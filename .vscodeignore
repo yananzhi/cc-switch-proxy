@@ -1,0 +1,13 @@
+.vscode/**
+.vscode-test/**
+src/**
+node_modules/**
+.gitignore
+tsconfig.json
+**/*.map
+cc-switch-configs.json
+mock/**
+*.vsix
+proxy/logs/**
+proxy/test/**
+.test-tmp/**

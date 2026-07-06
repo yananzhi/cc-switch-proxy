@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "LLM proxy core (ESM). Loaded via dynamic import by the TS extension host."
+}

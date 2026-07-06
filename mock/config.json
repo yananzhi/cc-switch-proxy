@@ -1,0 +1,19 @@
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "new-token-test",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787",
+    "API_TIMEOUT_MS": "2000",
+    "ANTHROPIC_MODEL": "mock-model"
+  },
+  "effortLevel": "xhigh",
+  "proxy": {
+    "listenHost": "127.0.0.1",
+    "listenPort": 11434,
+    "maxAttempts": 3,
+    "backoffSec": 0.1,
+    "backoffMaxSec": 0.5,
+    "passthrough": false,
+    "retryOnStatus": [],
+    "retryOnBodyErrorCode": [10310]
+  }
+}

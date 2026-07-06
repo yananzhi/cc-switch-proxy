@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Claude Code Switch 代理网络拓扑</title>
+<style>
+  :root{
+    --vscode:#1e1e1e; --bg:#0d1117; --panel:#161b22; --border:#30363d;
+    --txt:#e6edf3; --mute:#8b949e; --accent:#58a6ff; --green:#3fb950;
+    --orange:#d29922; --red:#f85149; --purple:#bc8cff; --line:#484f58;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:'Segoe UI',system-ui,sans-serif;padding:24px;line-height:1.5}
+  h1{font-size:22px;border-bottom:2px solid var(--border);padding-bottom:8px;margin:0 0 6px}
+  .sub{color:var(--mute);font-size:13px;margin-bottom:28px}
+  h2{font-size:17px;color:var(--accent);margin:36px 0 4px;display:flex;align-items:center;gap:8px}
+  h2 .num{background:var(--accent);color:#000;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+  .cap{color:var(--mute);font-size:13px;margin:0 0 16px}
+  figure{margin:0 0 30px}
+  svg{width:100%;max-width:920px;height:auto;display:block;background:var(--panel);border:1px solid var(--border);border-radius:10px}
+  figcaption{font-size:12px;color:var(--mute);margin-top:8px;text-align:center}
+
+  .box{fill:var(--panel);stroke:var(--border);stroke-width:1.5}
+  .box-vscode{stroke:var(--accent)}
+  .box-plugin{stroke:var(--purple)}
+  .box-proxy{stroke:var(--orange)}
+  .box-llm{stroke:var(--green)}
+  .title{font-size:14px;font-weight:700;fill:var(--txt)}
+  .subt{font-size:11px;fill:var(--mute)}
+  .lbl{font-size:11px;fill:var(--txt)}
+  .lbl-mute{font-size:11px;fill:var(--mute)}
+
+  .flow{fill:none;stroke-width:2.2;stroke-linecap:round}
+  .flow-data{stroke:var(--green);marker-end:url(#arrowG)}
+  .flow-rewrite{stroke:var(--orange);stroke-dasharray:6 4;marker-end:url(#arrowO)}
+  .flow-ctrl{stroke:var(--accent);stroke-dasharray:2 3;marker-end:url(#arrowB)}
+  .flow-dead{stroke:var(--line);stroke-dasharray:3 5;stroke-width:1.6}
+  .retry{stroke:var(--red);stroke-dasharray:5 3;marker-end:url(#arrowR)}
+
+  .pill{fill:#21262d;stroke:var(--border)}
+  .pill-txt{font-size:10px;fill:var(--txt)}
+
+  table{border-collapse:collapse;width:100%;max-width:920px;font-size:13px;margin:8px 0 24px}
+  th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#21262d;color:var(--accent)}
+  code{background:#21262d;padding:1px 5px;border-radius:4px;font-size:12px;color:var(--green)}
+  .k{color:var(--orange)}
+  .note{background:#161b22;border:1px solid var(--border);border-left:3px solid var(--orange);padding:12px 14px;border-radius:6px;font-size:13px;margin:12px 0}
+  .note b{color:var(--orange)}
+  ul{margin:6px 0;padding-left:22px}
+  li{margin:3px 0;font-size:13px}
+  .legend{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:var(--mute);margin:10px 0 24px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .swatch{width:22px;height:0;border-top:2.2px solid}
+  .sw-data{border-color:var(--green)}
+  .sw-rewrite{border-color:var(--orange);border-top-style:dashed}
+  .sw-ctrl{border-color:var(--accent);border-top-style:dashed}
+  .sw-retry{border-color:var(--red);border-top-style:dashed}
+  .sw-dead{border-color:var(--line);border-top-style:dashed}
+</style>
+</head>
+<body>
+
+<h1>Claude Code Switch + LLM 代理 — 网络拓扑</h1>
+<p class="sub">本插件的本质：通过改写 <code>~/.claude/settings.json</code> 里的 <code>env.ANTHROPIC_BASE_URL</code>，决定 Claude Code「连到哪」——直连真实上游，还是先走本地代理再转给真实上游。</p>
+
+<div class="legend">
+  <span><i class="swatch sw-data"></i>数据流（HTTP 请求/响应）</span>
+  <span><i class="swatch sw-rewrite"></i>改写配置 / 注入上游（控制面）</span>
+  <span><i class="swatch sw-ctrl"></i>心跳 / 生命周期</span>
+  <span><i class="swatch sw-retry"></i>重试（指数退避）</span>
+  <span><i class="swatch sw-dead"></i>不参与 / 断开</span>
+</div>
+
+<!-- ===================================================== 图1：代理模式 -->
+<h2><span class="num">1</span>代理模式：「通过代理连接」配置激活后</h2>
+<p class="cap">一条 <b>mode=proxy</b> 的配置被点激活时，扩展先把代理跑起来、把真实上游注入代理，再把 <code>settings.json</code> 的 baseUrl 改写成 <code>http://127.0.0.1:&lt;port&gt;</code>。重试发生在「代理 → 上游」这一段。</p>
+
+<figure>
+<svg viewBox="0 0 920 470" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowG" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#3fb950"/></marker>
+    <marker id="arrowO" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#d29922"/></marker>
+    <marker id="arrowB" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#58a6ff"/></marker>
+    <marker id="arrowR" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#f85149"/></marker>
+  </defs>
+
+  <!-- VS Code -->
+  <rect class="box box-vscode" x="20" y="40" width="180" height="400" rx="10"/>
+  <text class="title" x="110" y="64" text-anchor="middle">VS Code</text>
+  <text class="subt"  x="110" y="80" text-anchor="middle">（扩展宿主进程 / Electron）</text>
+
+    <!-- Claude Code 插件 -->
+    <rect class="box box-plugin" x="40" y="100" width="140" height="150" rx="8"/>
+    <text class="title" x="110" y="122" text-anchor="middle">Claude Code 插件</text>
+    <text class="subt"  x="110" y="138" text-anchor="middle">cc-switch 扩展</text>
+    <text class="lbl"   x="110" y="160" text-anchor="middle">激活配置时：</text>
+    <text class="lbl-mute" x="110" y="178" text-anchor="middle">① ensureRunning()</text>
+    <text class="lbl-mute" x="110" y="194" text-anchor="middle">② setUpstream(真实上游)</text>
+    <text class="lbl-mute" x="110" y="210" text-anchor="middle">③ 改写 settings.json</text>
+    <text class="lbl-mute" x="110" y="226" text-anchor="middle">   baseUrl → 127.0.0.1:port</text>
+
+    <!-- Claude Code 运行时 -->
+    <rect class="box" x="40" y="270" width="140" height="80" rx="8"/>
+    <text class="title" x="110" y="292" text-anchor="middle">Claude Code 运行时</text>
+    <text class="subt"  x="110" y="308" text-anchor="middle">读 settings.json 的 env</text>
+    <text class="lbl-mute" x="110" y="326" text-anchor="middle">BASE_URL → 127.0.0.1:port</text>
+    <text class="lbl-mute" x="110" y="342" text-anchor="middle">AUTH_TOKEN → 真实 token</text>
+
+  <!-- settings.json 文件标记 -->
+  <rect class="pill" x="55" y="370" width="110" height="48" rx="6"/>
+  <text class="pill-txt" x="110" y="388" text-anchor="middle">~/.claude/settings.json</text>
+  <text class="pill-txt k" x="110" y="404" text-anchor="middle">BASE_URL = 127.0.0.1:port</text>
+  <text class="pill-txt k" x="110" y="416" text-anchor="middle">（被改写，指向代理）</text>
+
+  <!-- 代理 -->
+  <rect class="box box-proxy" x="360" y="100" width="190" height="240" rx="10"/>
+  <text class="title" x="455" y="124" text-anchor="middle">代理 (proxy/server.js)</text>
+  <text class="subt"  x="455" y="140" text-anchor="middle">进程内常驻 · ESM · 零依赖</text>
+  <text class="lbl"   x="455" y="164" text-anchor="middle">监听 127.0.0.1:11434</text>
+  <text class="lbl-mute" x="455" y="184" text-anchor="middle">收到请求 → forwardOnce()</text>
+  <text class="lbl-mute" x="455" y="200" text-anchor="middle">判定 verdict：</text>
+  <text class="lbl-mute" x="455" y="216" text-anchor="middle">· 2xx → 直接回客户端</text>
+  <text class="lbl-mute k" x="455" y="232" text-anchor="middle">· 503+body code 10310 → 重试</text>
+  <text class="lbl-mute" x="455" y="248" text-anchor="middle">· 其余 → 透传给 CC</text>
+  <text class="lbl-mute" x="455" y="264" text-anchor="middle">  （含网络错误/超时/断连）</text>
+  <text class="lbl-mute" x="455" y="288" text-anchor="middle">指数退避 backoffForMs()</text>
+  <text class="lbl-mute" x="455" y="304" text-anchor="middle">maxAttempts=20, 上限 16s</text>
+  <text class="lbl-mute" x="455" y="324" text-anchor="middle">写 trace 到 logs/</text>
+
+  <!-- LLM API -->
+  <rect class="box box-llm" x="700" y="130" width="200" height="180" rx="10"/>
+  <text class="title" x="800" y="154" text-anchor="middle">LLM API 服务</text>
+  <text class="subt"  x="800" y="170" text-anchor="middle">真实上游（如讯飞 / Anthropic）</text>
+  <text class="lbl-mute" x="800" y="196" text-anchor="middle">真实 baseUrl + token</text>
+  <text class="lbl-mute" x="800" y="214" text-anchor="middle">由插件从配置 content.env</text>
+  <text class="lbl-mute" x="800" y="230" text-anchor="middle">解出后注入代理</text>
+  <text class="lbl-mute" x="800" y="258" text-anchor="middle">可能回 503 system busy</text>
+  <text class="lbl-mute" x="800" y="274" text-anchor="middle">code 10310</text>
+
+  <!-- ① 控制面：插件 → 代理（注入上游 + ensureRunning） -->
+  <path class="flow flow-rewrite" d="M180 178 C 270 178, 270 180, 360 180"/>
+  <text class="lbl k" x="270" y="172" text-anchor="middle">① 注入真实上游</text>
+  <text class="lbl-mute" x="270" y="186" text-anchor="middle">baseUrl/token/model</text>
+
+  <!-- ② 改写 settings.json（插件内部，画一条自环到文件） -->
+  <path class="flow flow-rewrite" d="M110 240 L 110 368"/>
+  <text class="lbl k" x="120" y="300" >② 改写</text>
+
+  <!-- ③ 数据流：Claude Code 运行时 → 代理 -->
+  <path class="flow flow-data" d="M180 310 C 270 310, 270 220, 360 220"/>
+  <text class="lbl" x="266" y="258" text-anchor="middle">③ HTTP 请求</text>
+  <text class="lbl-mute" x="266" y="272" text-anchor="middle">POST /v1/messages …</text>
+  <text class="lbl-mute" x="266" y="286" text-anchor="middle">Authorization: Bearer 真实token</text>
+
+  <!-- ④ 数据流：代理 → LLM API -->
+  <path class="flow flow-data" d="M550 200 C 620 200, 630 200, 700 200"/>
+  <text class="lbl" x="625" y="192" text-anchor="middle">④ 转发到真实上游</text>
+
+  <!-- ⑤ 重试：LLM 回 503/10310 → 代理重试（自环） -->
+  <path class="flow retry" d="M700 232 C 640 270, 600 270, 550 250" />
+  <text class="lbl" x="625" y="282" text-anchor="middle" fill="#f85149">⑤ 503 / 10310</text>
+  <text class="lbl-mute" x="625" y="296" text-anchor="middle">指数退避重试 ≤20 次</text>
+
+  <!-- ⑥ 最终响应回 Claude Code -->
+  <path class="flow flow-data" d="M360 250 C 270 250, 270 326, 180 326" stroke-dasharray="4 3"/>
+  <text class="lbl" x="266" y="318" text-anchor="middle">⑥ 重试成功后回</text>
+
+  <!-- 心跳：插件 ↔ 代理（同机 localhost，画在下方） -->
+  <path class="flow flow-ctrl" d="M180 355 C 280 430, 360 380, 455 340"/>
+  <text class="lbl-mute" x="300" y="430" text-anchor="middle">2s 心跳 /healthz · 单例 · 接管</text>
+</svg>
+<figcaption>图 1 · 代理模式：配置 mode=proxy 时的连接与重试。代理拦截「Claude Code → 上游」这一段，对瞬时错误做指数退避重试。</figcaption>
+</figure>
+
+<div class="note">
+<b>重试机制在哪里？</b> 在「代理 → LLM API」这一跳（图示 ⑤）。代理只重试 Claude Code 处理不了的——<code>HTTP 503</code> + body <code>error.code === 10310</code>（讯飞 system busy）。<b>为什么是这一条：</b>查 Claude Code 源码（<code>services/api/withRetry.ts</code>），它关掉了 SDK 自带重试、自己手写重试，会把 503 当普通 5xx 盲目重试 10 次，<b>但不识别 10310 这个业务码</b>——代理的针对重试（20 次 + 16s 上限）对讯飞 system busy 更有效。其余全部透传交给 Claude Code：429/500/502/504（CC 当 5xx/限流重试）、网络错误/超时/断连/流中断（CC 当 APIConnectionError 重试，代理无法原样转 socket 错误，合成 502 回客户端，CC 仍当 5xx 重试，语义等价）。退避 <code>backoffForMs = min(backoffSec*2^(n-1), 16s)</code>，最多 20 次。
+</div>
+
+<table>
+<tr><th>组件</th><th>角色</th><th>关键事实</th></tr>
+<tr><td>VS Code</td><td>宿主进程</td><td>扩展和代理都跑在它的扩展宿主进程内；<code>extensionKind: workspace</code>，WSL 里代理与 Claude Code 同 localhost</td></tr>
+<tr><td>Claude Code 插件 (cc-switch)</td><td>编排者 / 控制面</td><td>不碰数据流本身；只做三件事：拉起代理、注入真实上游、改写 <code>settings.json</code> 的 <code>ANTHROPIC_BASE_URL</code></td></tr>
+<tr><td>代理 (proxy/server.js)</td><td>数据面 + 重试</td><td>监听 127.0.0.1:11434；收到请求转发给真实上游；对 503/10310 等做指数退避重试；其余透传</td></tr>
+<tr><td>LLM API 服务</td><td>真实上游</td><td>真实 baseUrl + token 由插件从配置 <code>content.env</code> 解出后注入代理；Claude Code 看不到真实地址（只看到 127.0.0.1）</td></tr>
+</table>
+
+<!-- ===================================================== 图2：直连模式 -->
+<h2><span class="num">2</span>直连模式：「直连」配置激活后</h2>
+<p class="cap">默认模式。一条 <b>mode=direct</b> 的配置被激活时，扩展只是把配置 content 原样写进 <code>settings.json</code>，代理完全不参与——和原 cc-switch 行为一致。</p>
+
+<figure>
+<svg viewBox="0 0 920 340" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowG2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#3fb950"/></marker>
+    <marker id="arrowO2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#d29922"/></marker>
+  </defs>
+
+  <!-- VS Code -->
+  <rect class="box box-vscode" x="20" y="30" width="200" height="280" rx="10"/>
+  <text class="title" x="120" y="54" text-anchor="middle">VS Code</text>
+
+    <rect class="box box-plugin" x="40" y="76" width="160" height="90" rx="8"/>
+    <text class="title" x="120" y="98" text-anchor="middle">Claude Code 插件</text>
+    <text class="subt"  x="120" y="114" text-anchor="middle">只做一件事：</text>
+    <text class="lbl-mute k" x="120" y="132" text-anchor="middle">把 content 原样写进</text>
+    <text class="lbl-mute k" x="120" y="148" text-anchor="middle">settings.json</text>
+
+    <rect class="box" x="40" y="180" width="160" height="70" rx="8"/>
+    <text class="title" x="120" y="202" text-anchor="middle">Claude Code 运行时</text>
+    <text class="lbl-mute" x="120" y="222" text-anchor="middle">读 settings.json 的 env</text>
+    <text class="lbl-mute k" x="120" y="238" text-anchor="middle">BASE_URL = 真实上游</text>
+
+    <rect class="pill" x="55" y="262" width="130" height="38" rx="6"/>
+    <text class="pill-txt" x="120" y="278" text-anchor="middle">~/.claude/settings.json</text>
+    <text class="pill-txt k" x="120" y="293" text-anchor="middle">BASE_URL = 真实上游 URL</text>
+
+  <!-- 代理：灰色虚框，表示不参与 -->
+  <rect class="box" x="340" y="110" width="170" height="120" rx="10" fill="#0d1117" stroke-dasharray="4 4"/>
+  <text class="title" x="425" y="134" text-anchor="middle" fill="#484f58">代理（不参与）</text>
+  <text class="subt"  x="425" y="150" text-anchor="middle" fill="#484f58">直连模式下完全不监听</text>
+  <text class="subt"  x="425" y="166" text-anchor="middle" fill="#484f58">（或常驻但无上游注入）</text>
+  <text class="subt"  x="425" y="196" text-anchor="middle" fill="#484f58">→ 数据流不经过这里</text>
+  <text class="subt"  x="425" y="212" text-anchor="middle" fill="#484f58">→ 没有重试</text>
+
+  <!-- LLM API -->
+  <rect class="box box-llm" x="640" y="110" width="220" height="120" rx="10"/>
+  <text class="title" x="750" y="134" text-anchor="middle">LLM API 服务（真实上游）</text>
+  <text class="lbl-mute" x="750" y="158" text-anchor="middle">Claude Code 直连此地址</text>
+  <text class="lbl-mute" x="750" y="174" text-anchor="middle">若回 503 / 10310</text>
+  <text class="lbl-mute" x="750" y="190" text-anchor="middle">Claude Code 自己处理不了</text>
+  <text class="lbl-mute k" x="750" y="212" text-anchor="middle">→ 报错给用户</text>
+
+  <!-- 改写 settings.json -->
+  <path class="flow flow-rewrite" d="M120 166 L 120 260"/>
+  <text class="lbl k" x="130" y="216">写配置</text>
+
+  <!-- 数据流：直连 LLM，跨过代理 -->
+  <path class="flow flow-data" d="M200 215 C 380 215, 480 170, 640 170"/>
+  <text class="lbl" x="420" y="160" text-anchor="middle">HTTP 请求（直连，不经代理）</text>
+  <text class="lbl-mute" x="420" y="178" text-anchor="middle">Claude Code ↔ 真实 LLM API</text>
+
+  <!-- 标注代理被绕过 -->
+  <path class="flow flow-dead" d="M200 245 C 270 245, 270 245, 335 200"/>
+  <text class="lbl-mute" x="270" y="258" text-anchor="middle">绕过</text>
+</svg>
+<figcaption>图 2 · 直连模式：mode=direct。扩展只写 settings.json，数据流 Claude Code ↔ LLM API 直连，代理绕过，无重试。</figcaption>
+</figure>
+
+<div class="note">
+<b>为什么默认是直连？</b> 直连不引入任何额外跳数、不动网络路径，等于「不用代理」——只有切到 <code>mode=proxy</code> 的配置时代理才参与。这保证了「我只想切配置、不想要代理」的场景跟原 cc-switch 完全一致，零风险。
+</div>
+
+<!-- ===================================================== 图3：Claude Code 根据什么连 -->
+<h2><span class="num">3</span>Claude Code 本身根据什么、向哪里连？</h2>
+<p class="cap">不管哪种模式，Claude Code 运行时只认一个东西：<code>~/.claude/settings.json</code> 里的 <code>env</code>。本插件能「改连接方式」的全部原理，就在下面这张表里。</p>
+
+<figure>
+<svg viewBox="0 0 920 360" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowG3" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#3fb950"/></marker>
+    <marker id="arrowB3" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#58a6ff"/></marker>
+  </defs>
+
+  <!-- settings.json 是唯一开关 -->
+  <rect class="box box-plugin" x="30" y="120" width="240" height="120" rx="10"/>
+  <text class="title" x="150" y="144" text-anchor="middle">~/.claude/settings.json</text>
+  <text class="subt"  x="150" y="160" text-anchor="middle">Claude Code 启动时读取的唯一配置</text>
+  <text class="lbl-mute k" x="45" y="184">env.ANTHROPIC_BASE_URL  → 连到哪</text>
+  <text class="lbl-mute k" x="45" y="202">env.ANTHROPIC_AUTH_TOKEN → 凭什么连</text>
+  <text class="lbl-mute" x="45" y="220">env.ANTHROPIC_MODEL → 用哪个模型</text>
+  <text class="lbl-mute" x="45" y="234" >（这些 key 是 Anthropic SDK 标准）</text>
+
+  <!-- 两个分支 -->
+  <text class="title" x="540" y="80" text-anchor="middle" fill="#8b949e">settings.json 里 BASE_URL 的值，决定了去向</text>
+
+  <!-- 直连分支 -->
+  <rect class="box box-llm" x="380" y="100" width="200" height="90" rx="10"/>
+  <text class="title" x="480" y="124" text-anchor="middle">值 = 真实上游 URL</text>
+  <text class="subt"  x="480" y="140" text-anchor="middle">（直连模式写入）</text>
+  <text class="lbl-mute k" x="480" y="162" text-anchor="middle">→ Claude Code 直连 LLM</text>
+  <text class="lbl-mute" x="480" y="178" text-anchor="middle">如 https://api.xxx.com</text>
+
+  <!-- 代理分支 -->
+  <rect class="box box-proxy" x="380" y="210" width="200" height="90" rx="10"/>
+  <text class="title" x="480" y="234" text-anchor="middle">值 = http://127.0.0.1:port</text>
+  <text class="subt"  x="480" y="250" text-anchor="middle">（代理模式写入）</text>
+  <text class="lbl-mute k" x="480" y="272" text-anchor="middle">→ Claude Code 连本地代理</text>
+  <text class="lbl-mute" x="480" y="288" text-anchor="middle">代理再转给真实上游</text>
+
+  <!-- 指向 -->
+  <path class="flow flow-data" d="M270 175 C 320 150, 340 150, 380 150"/>
+  <path class="flow flow-data" d="M270 185 C 320 250, 340 250, 380 250"/>
+
+  <!-- 真实 LLM 终点 -->
+  <rect class="box box-llm" x="700" y="100" width="190" height="200" rx="10"/>
+  <text class="title" x="795" y="124" text-anchor="middle">LLM API 服务</text>
+  <text class="lbl-mute" x="795" y="150" text-anchor="middle">直连分支：直接到达</text>
+  <text class="lbl-mute k" x="795" y="178" text-anchor="middle">代理分支：</text>
+  <text class="lbl-mute" x="795" y="194" text-anchor="middle">Claude Code 以为自己</text>
+  <text class="lbl-mute" x="795" y="210" text-anchor="middle">连的是"上游"，</text>
+  <text class="lbl-mute" x="795" y="226" text-anchor="middle">实际连的是本地代理；</text>
+  <text class="lbl-mute" x="795" y="242" text-anchor="middle">真实 baseUrl/token</text>
+  <text class="lbl-mute" x="795" y="258" text-anchor="middle">只存在代理内存里，</text>
+  <text class="lbl-mute" x="795" y="274" text-anchor="middle">Claude Code 看不到</text>
+
+  <path class="flow flow-data" d="M580 145 C 640 145, 660 170, 700 170"/>
+  <path class="flow flow-data" d="M580 255 C 640 255, 660 230, 700 230" stroke-dasharray="4 3"/>
+  <text class="lbl-mute" x="640" y="200" text-anchor="middle">两条路殊途同归</text>
+</svg>
+<figcaption>图 3 · Claude Code 的连接决策只看 settings.json 的 env。插件能切换「直连/代理」的唯一手段，就是改写这个文件里的 BASE_URL 值。</figcaption>
+</figure>
+
+<!-- ===================================================== 实现要点 -->
+<h2><span class="num">4</span>实现要点：用代理 vs 不用代理，差在哪？</h2>
+
+<table>
+<tr><th>维度</th><th>直连（mode=direct）</th><th>代理（mode=proxy）</th></tr>
+<tr>
+  <td>扩展激活时做的事</td>
+  <td>仅 <code>writeSettings(content)</code>，把配置原样写进 settings.json</td>
+  <td>① <code>proxyHost.ensureRunning()</code> 拉起代理<br>② <code>setUpstream(真实baseUrl/token/model)</code> 注入<br>③ <code>synthesizeProxySettings()</code> 把 BASE_URL 改成 127.0.0.1:port 后写入 settings.json</td>
+</tr>
+<tr>
+  <td>settings.json 里 BASE_URL 的值</td>
+  <td>真实上游 URL（配置 content.env 原值）</td>
+  <td><code>http://127.0.0.1:11434</code>（被改写）</td>
+</tr>
+<tr>
+  <td>Claude Code 看到的连接目标</td>
+  <td>真实上游</td>
+  <td>本地代理（看不到真实地址）</td>
+</tr>
+<tr>
+  <td>真实 token 存在哪</td>
+  <td>settings.json 里（Claude Code 直接读）</td>
+  <td>代理内存里（注入进去）；settings.json 里仍是真实 token，代理转发时用</td>
+</tr>
+<tr>
+  <td>数据流路径</td>
+  <td>Claude Code → LLM API（一跳）</td>
+  <td>Claude Code → 代理 → LLM API（两跳）</td>
+</tr>
+<tr>
+  <td>503 / code 10310 怎么办</td>
+  <td>Claude Code 处理不了 → 报错给用户</td>
+  <td>代理拦截，指数退避重试 ≤20 次，成功后才回 Claude Code</td>
+</tr>
+<tr>
+  <td>其他状态码 + 网络错误<br>（429/500/502/504、超时/断连/流中断）</td>
+  <td colspan="2" style="text-align:center;color:var(--mute)">两种模式都一样：Claude Code 自己会重试这些（5xx→重试、APIConnectionError→重试，各 10 次），代理<b>不插手</b>。代理模式下代理原样透传或合成 502 回客户端（retryOnStatus 为空），让 CC 当 5xx 自己重试。</td>
+</tr>
+<tr>
+  <td>代理是否参与</td>
+  <td>完全不参与（可能常驻但不注入上游）</td>
+  <td>必须参与：监听 + 注入上游 + 拦截重试</td>
+</tr>
+<tr>
+  <td>可观测性</td>
+  <td>无（Claude Code 自己的日志）</td>
+  <td>Web 控制台看重试 trace + 详细日志（<code>http://127.0.0.1:port/</code>）</td>
+</tr>
+</table>
+
+<div class="note">
+<b>一句话总结：</b> 本插件不改 Claude Code 本身的代码，只改它的「连接配置」——直连时把真实地址写进 settings.json；代理时把地址改成本地 127.0.0.1，让 Claude Code 以为在连上游、实际连的是代理，由代理转给真实上游并兜底重试。同一个开关（settings.json 的 <code>env.ANTHROPIC_BASE_URL</code>），两个值，两种连接方式。
+</div>
+
+</body>
+</html>

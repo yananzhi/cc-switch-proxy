@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LLM Gateway</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel2: #1e222b;
+    --border: #2a2f3a;
+    --text: #e6e8eb;
+    --muted: #8b93a1;
+    --accent: #4f9cf9;
+    --green: #4ade80;
+    --red: #f87171;
+    --amber: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  nav { display: flex; gap: 4px; margin-left: auto; }
+  nav button {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--muted);
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  nav button.active { background: var(--panel2); color: var(--text); border-color: var(--border); }
+  nav button:hover { color: var(--text); }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 14px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .row label { width: 160px; color: var(--muted); flex-shrink: 0; }
+  .row .hint { color: var(--muted); font-size: 12px; }
+  input[type="number"], input[type="text"] {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 5px;
+    font-size: 13px;
+    width: 140px;
+    font-family: inherit;
+  }
+  input:disabled { opacity: 0.5; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: ui-monospace, monospace;
+  }
+  .chip button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+  .chip button:hover { color: var(--red); }
+  .add-input {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 3px 8px;
+    border-radius: 4px;
+    width: 80px;
+    font-size: 12px;
+    font-family: ui-monospace, monospace;
+  }
+
+  button.primary {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button.primary:hover { filter: brightness(1.1); }
+  button.secondary {
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 8px 16px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .actions { display: flex; gap: 10px; margin-top: 16px; }
+
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .toast.show { opacity: 1; }
+  .toast.ok { background: var(--green); color: #062; }
+  .toast.err { background: var(--red); color: #400; }
+
+  /* trace list */
+  .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar label { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .toolbar .spacer { flex: 1; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
+  tr.row { cursor: pointer; }
+  tr.row:hover { background: var(--panel2); }
+  td .id { font-family: ui-monospace, monospace; }
+  td .time { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+  .badge { padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+  .badge.success { background: rgba(74,222,128,0.15); color: var(--green); }
+  .badge.after-retry { background: rgba(251,191,36,0.15); color: var(--amber); }
+  .badge.failed { background: rgba(248,113,113,0.15); color: var(--red); }
+  .badge.direct { background: rgba(139,147,161,0.15); color: var(--muted); }
+  .badge.pass { background: rgba(139,147,161,0.15); color: var(--muted); }
+  .badge.passthrough { background: rgba(251,191,36,0.15); color: var(--amber); }
+  .status-2xx { color: var(--green); }
+  .status-4xx { color: var(--amber); }
+  .status-5xx, .status-neterr { color: var(--red); }
+
+  /* 展开子记录：attempts 列表 */
+  .sub-row { background: rgba(127,127,127,0.06); }
+  .sub-cell { padding: 8px 12px 10px 28px !important; }
+  .att-list { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-family: ui-monospace, monospace; }
+  .att-line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .att-num { color: var(--muted); min-width: 5.5em; }
+  .vtag { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: rgba(127,127,127,0.15); color: var(--muted); }
+  .vtag.v-success { background: rgba(74,222,128,0.15); color: var(--green); }
+  .vtag.v-retry { background: rgba(251,191,36,0.15); color: var(--amber); }
+  .vtag.v-noretry { background: rgba(248,113,113,0.15); color: var(--red); }
+  .vtag.v-pass { background: rgba(139,147,161,0.15); color: var(--muted); }
+  .arrow { user-select: none; }
+
+  /* detail */
+  .detail-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    display: none; z-index: 50;
+  }
+  .detail-overlay.show { display: block; }
+  .detail-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 680px; max-width: 95vw;
+    background: var(--panel); border-left: 1px solid var(--border);
+    overflow-y: auto; padding: 20px; transform: translateX(100%); transition: transform 0.2s;
+  }
+  .detail-overlay.show .detail-panel { transform: translateX(0); }
+  .detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .detail-header h3 { margin: 0; font-size: 16px; }
+  .detail-header .close { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin-bottom: 14px; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-family: ui-monospace, monospace; word-break: break-all; }
+  .section { margin-bottom: 18px; }
+  .section-title { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .section-title span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .section-title button { background: var(--panel2); border: 1px solid var(--border); color: var(--muted); padding: 2px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; }
+  pre.body-box {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+    padding: 10px; margin: 0; max-height: 240px; overflow: auto;
+    font-size: 12px; font-family: ui-monospace, "Cascadia Code", monospace;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .attempt-line { font-family: ui-monospace, monospace; font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .attempt-line:last-child { border-bottom: none; }
+  .attempt-line .num { color: var(--muted); display: inline-block; width: 70px; }
+  .empty { text-align: center; color: var(--muted); padding: 40px; }
+
+  /* 模式开关 */
+  .mode-card { display: flex; align-items: center; gap: 16px; }
+  .mode-card .label { font-size: 15px; font-weight: 500; }
+  .mode-card .desc { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .switch { position: relative; display: inline-block; width: 52px; height: 28px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; cursor: pointer; inset: 0; background: var(--panel2); border: 1px solid var(--border); border-radius: 28px; transition: 0.2s; }
+  .slider:before { content: ""; position: absolute; height: 20px; width: 20px; left: 3px; top: 3px; background: var(--muted); border-radius: 50%; transition: 0.2s; }
+  .switch input:checked + .slider { background: rgba(248,113,113,0.2); border-color: var(--red); }
+  .switch input:checked + .slider:before { transform: translateX(22px); background: var(--red); }
+  .mode-badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+  .mode-badge.retry { background: rgba(74,222,128,0.15); color: var(--green); }
+  .mode-badge.passthrough { background: rgba(248,113,113,0.15); color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <h1>LLM Gateway</h1>
+  <nav>
+    <button id="tab-config" class="active" onclick="showTab('config')">配置</button>
+    <button id="tab-traces" onclick="showTab('traces')">重试记录</button>
+  </nav>
+</header>
+
+<main>
+  <!-- 配置页 -->
+  <section id="page-config">
+    <div class="card mode-card">
+      <label class="switch">
+        <input type="checkbox" id="cfg-passthrough" onchange="togglePassthrough(this.checked)" />
+        <span class="slider"></span>
+      </label>
+      <div>
+        <div class="label">运行模式：<span id="mode-badge" class="mode-badge retry">拦截重试</span></div>
+        <div class="desc">关闭=拦截重试（代理自动重试 503 等）；开启=透传（上游返回什么就原样给 Claude Code，不重试，用于诊断 Claude Code 自己能处理哪些 503）</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>重试策略</h2>
+      <div class="row">
+        <label>最大重试次数</label>
+        <input type="number" id="cfg-maxAttempts" min="1" max="1000" />
+        <span class="hint">含首次，1~1000</span>
+      </div>
+      <div class="row">
+        <label>退避起始值 (秒)</label>
+        <input type="number" id="cfg-backoffSec" min="0" step="0.1" />
+        <span class="hint">指数退避 2^n 起点</span>
+      </div>
+      <div class="row">
+        <label>最终退避上限 (秒)</label>
+        <input type="number" id="cfg-backoffMaxSec" min="0" step="0.1" />
+        <span class="hint">单次等待封顶</span>
+      </div>
+      <div class="row">
+        <label>退避序列预览</label>
+        <span class="hint" id="backoff-preview" style="font-family:ui-monospace,monospace"></span>
+      </div>
+      <div class="row">
+        <label>重试状态码</label>
+        <div class="chips" id="cfg-retryOnStatus"></div>
+        <input class="add-input" id="add-status" placeholder="+ 添加" />
+      </div>
+      <div class="row">
+        <label>body 错误码重试</label>
+        <div class="chips" id="cfg-retryOnBodyErrorCode"></div>
+        <input class="add-input" id="add-bodycode" placeholder="+ 添加" />
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="saveConfig()">保存并热重载</button>
+        <button class="secondary" onclick="loadConfig()">重新加载</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>当前上游（只读 · 由 cc-switch 激活的"通过代理"配置注入）</h2>
+      <div class="row">
+        <label>Base URL</label>
+        <input type="text" id="cfg-upstream" style="width:480px" disabled />
+      </div>
+      <div class="row">
+        <label>Model</label>
+        <input type="text" id="cfg-model" style="width:240px" disabled />
+        <span class="hint">主模型</span>
+      </div>
+      <div class="row">
+        <label>小快模型</label>
+        <input type="text" id="cfg-smallFastModel" style="width:240px" disabled />
+        <span class="hint">ANTHROPIC_SMALL_FAST_MODEL</span>
+      </div>
+      <div class="row">
+        <label>上游超时 (秒)</label>
+        <input type="number" id="cfg-timeoutSec" min="1" step="1" disabled />
+        <span class="hint">单次请求超时</span>
+      </div>
+      <div class="row">
+        <label>Token</label>
+        <input type="text" id="cfg-token" style="width:380px" disabled />
+        <span class="hint" id="cfg-token-hint"></span>
+      </div>
+      <div class="hint" style="margin-top:6px">上游由 cc-switch 管理。要换上游，请在 cc-switch 里激活另一条"通过代理"配置。</div>
+    </div>
+
+    <div class="card">
+      <h2>日志存储位置</h2>
+      <div class="row">
+        <label>当前目录</label>
+        <input type="text" id="cfg-logsDir-current" style="width:480px" disabled />
+        <span class="hint" id="cfg-logsDir-status"></span>
+      </div>
+      <div class="row">
+        <label>改为</label>
+        <input type="text" id="cfg-logsDir-input" style="width:480px" placeholder="绝对路径，如 D:\cc-switch-logs 或 /home/user/logs" />
+        <span class="hint">留空保存=恢复默认（globalStorage/logs）</span>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="saveLogsDir()">保存并立即生效</button>
+      </div>
+      <div class="hint" style="margin-top:6px">改完下一条 trace 即写新目录，历史日志留在原地不迁移。空目录会自动创建。注意：Windows 和 WSL 各自独立（各自的 globalStorage），不共享。</div>
+    </div>
+
+    <div class="card">
+      <h2>代理监听端口</h2>
+      <div class="row">
+        <label>当前端口</label>
+        <input type="text" id="cfg-port-current" style="width:120px" disabled />
+        <span class="hint" id="cfg-port-platform"></span>
+      </div>
+      <div class="row">
+        <label>改为</label>
+        <input type="number" id="cfg-port-input" style="width:120px" min="1024" max="65535" placeholder="如 11435" />
+        <span class="hint">默认按平台：Windows 11434 / Linux(含WSL) 11435 / macOS 11436</span>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="savePort()">保存并重启代理</button>
+      </div>
+      <div class="hint" style="margin-top:6px;color:var(--amber)">改端口后需重启代理才生效（监听 socket 不能热换）。若当前是"通过代理"模式，重启后请到 cc-switch 重新激活该配置，让 settings.json 的 baseUrl 跟上新端口。</div>
+    </div>
+  </section>
+
+  <!-- 重试记录页 -->
+  <section id="page-traces" style="display:none">
+    <div class="card">
+      <div class="toolbar" style="flex-wrap:wrap;gap:8px 12px;align-items:center">
+        <div class="filter-group" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <input type="radio" name="traceMode" id="mode-all" value="all" checked onchange="onModeChange()">
+          <label for="mode-all" title="不过滤，所有请求">全部</label>
+          <input type="radio" name="traceMode" id="mode-retried" value="retried" onchange="onModeChange()">
+          <label for="mode-retried" title="代理内部转发了一次以上（attempts>1）。含重试后成功 + 重试耗尽">代理重试过</label>
+          <input type="radio" name="traceMode" id="mode-failed" value="failed" onchange="onModeChange()">
+          <label for="mode-failed" title="代理重试耗尽，给 CC 返回 502。仅代理层面放弃，不代表 CC 最终失败">代理认栽</label>
+          <input type="radio" name="traceMode" id="mode-llm-error" value="llm-error" onchange="onModeChange()">
+          <label for="mode-llm-error" title="上游 LLM API 在这次请求里返回过非 2xx 或网络错误（含被重试救回的、含透传的）">LLM 返回过非成功</label>
+        </div>
+        <label><input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()" /> 自动刷新</label>
+        <span class="spacer"></span>
+        <button class="secondary" onclick="openLogsDir()" title="在系统文件管理器里打开 trace 文件所在目录">打开记录目录</button>
+        <button class="secondary" onclick="killProxy()" title="关闭代理监听，宿主窗口心跳会在 2s 内自动重起。注意：重起的是宿主内存里已缓存的代码，改了 proxy 代码不会因此重新加载">重启代理</button>
+        <button class="secondary" onclick="refreshTraces()">刷新</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>发出时间</th>
+            <th>#ID</th>
+            <th>源IP</th>
+            <th>方法/路径</th>
+            <th>错误码</th>
+            <th>尝试</th>
+            <th>总耗时</th>
+            <th>结果</th>
+          </tr>
+        </thead>
+        <tbody id="trace-tbody">
+          <tr><td colspan="8" class="empty">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- 详情抽屉 -->
+<div class="detail-overlay" id="detail-overlay" onclick="if(event.target===this)closeDetail()">
+  <div class="detail-panel">
+    <div class="detail-header">
+      <h3 id="d-title">请求 #</h3>
+      <button class="close" onclick="closeDetail()">×</button>
+    </div>
+    <div class="kv" id="d-meta"></div>
+    <div class="section">
+      <div class="section-title"><span>请求完整 body</span><button onclick="copyText(d_trace.requestBody)">复制</button></div>
+      <pre class="body-box" id="d-req"></pre>
+    </div>
+    <div class="section">
+      <div class="section-title"><span>返回完整 body（最终交付）</span><button onclick="copyText(d_trace.responseBody)">复制</button></div>
+      <pre class="body-box" id="d-resp"></pre>
+    </div>
+    <div class="section">
+      <div class="section-title"><span>重试轨迹</span></div>
+      <div id="d-attempts"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let d_trace = null;
+let refreshTimer = null;
+let lastSince = null;
+
+function showTab(name) {
+  document.getElementById('page-config').style.display = name === 'config' ? '' : 'none';
+  document.getElementById('page-traces').style.display = name === 'traces' ? '' : 'none';
+  document.getElementById('tab-config').classList.toggle('active', name === 'config');
+  document.getElementById('tab-traces').classList.toggle('active', name === 'traces');
+  if (name === 'config') loadConfig();
+  if (name === 'traces') refreshTraces();
+}
+
+function toast(msg, ok = true) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (ok ? 'ok' : 'err');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ── 配置页 ──────────────────────────────────────────────
+async function loadConfig() {
+  try {
+    const r = await (await fetch('/api/config')).json();
+    const p = r.proxy;
+    document.getElementById('cfg-maxAttempts').value = p.maxAttempts;
+    document.getElementById('cfg-backoffSec').value = p.backoffSec;
+    document.getElementById('cfg-backoffMaxSec').value = p.backoffMaxSec;
+    // 透传开关
+    document.getElementById('cfg-passthrough').checked = !!p.passthrough;
+    updateModeBadge(!!p.passthrough);
+    // 上游
+    document.getElementById('cfg-upstream').value = r.upstream.baseUrl || '(未注入)';
+    document.getElementById('cfg-model').value = r.upstream.model || '(未注入)';
+    document.getElementById('cfg-smallFastModel').value = r.upstream.smallFastModel || '';
+    document.getElementById('cfg-timeoutSec').value = r.upstream.timeoutSec;
+    document.getElementById('cfg-token').value = r.upstream.tokenMasked || '***';
+    document.getElementById('cfg-token-hint').textContent = r.upstream.baseUrl ? '' : '尚未激活任何"通过代理"配置';
+    renderChips('cfg-retryOnStatus', p.retryOnStatus);
+    renderChips('cfg-retryOnBodyErrorCode', p.retryOnBodyErrorCode);
+    updateBackoffPreview();
+    // 日志目录
+    await loadLogsDir();
+    // 代理端口
+    await loadPort();
+  } catch (e) {
+    toast('加载配置失败: ' + e.message, false);
+  }
+}
+
+async function loadLogsDir() {
+  try {
+    const r = await (await fetch('/api/logs-dir')).json();
+    document.getElementById('cfg-logsDir-current').value = r.dir || '(未设置)';
+    const status = document.getElementById('cfg-logsDir-status');
+    status.textContent = r.configured ? '自定义' : '默认';
+    document.getElementById('cfg-logsDir-input').value = r.configured ? r.dir : '';
+  } catch (e) {
+    // 单独失败不打断主配置加载
+    document.getElementById('cfg-logsDir-current').value = '(加载失败: ' + e.message + ')';
+  }
+}
+
+async function loadPort() {
+  try {
+    const r = await (await fetch('/api/port')).json();
+    document.getElementById('cfg-port-current').value = r.port || '';
+    document.getElementById('cfg-port-platform').textContent = '本平台默认: ' + (r.defaultPort || '?');
+    // 输入框预填当前端口，方便微调
+    document.getElementById('cfg-port-input').value = r.port || '';
+  } catch (e) {
+    document.getElementById('cfg-port-current').value = '(加载失败)';
+  }
+}
+
+async function savePort() {
+  const port = document.getElementById('cfg-port-input').value.trim();
+  const n = Number(port);
+  if (!port || !Number.isFinite(n) || n < 1024 || n > 65535) {
+    toast('端口必须是 1024..65535 的整数', false);
+    return;
+  }
+  if (!confirm(`改端口为 ${n}？\n将关闭代理监听，宿主心跳 2s 内用新端口重起。\n若当前是"通过代理"模式，重起后请到 cc-switch 重新激活该配置，让 settings.json 的 baseUrl 跟上新端口。`)) return;
+  try {
+    const r = await (await fetch('/api/port', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ port: n }),
+    })).json();
+    if (r.ok) {
+      toast('端口已改为 ' + r.port + '，代理将重起。若是代理模式，请重新激活配置。');
+      // 代理已 kill，2s 后用新端口重起。旧端口的页面会失联，提示用户。
+      setTimeout(() => { try { location.reload(); } catch {} }, 2500);
+    } else {
+      toast('保存失败: ' + (r.error || '未知错误'), false);
+    }
+  } catch (e) {
+    toast('保存失败: ' + e.message, false);
+  }
+}
+
+async function saveLogsDir() {
+  const dir = document.getElementById('cfg-logsDir-input').value.trim();
+  try {
+    const r = await (await fetch('/api/logs-dir', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dir }),
+    })).json();
+    if (r.ok) {
+      toast('日志目录已改为: ' + r.dir + '，下条 trace 即生效');
+      await loadLogsDir();
+    } else {
+      toast('保存失败: ' + (r.error || '未知错误'), false);
+    }
+  } catch (e) {
+    toast('保存失败: ' + e.message, false);
+  }
+}
+
+function updateModeBadge(passthrough) {
+  const el = document.getElementById('mode-badge');
+  el.textContent = passthrough ? '透传' : '拦截重试';
+  el.className = 'mode-badge ' + (passthrough ? 'passthrough' : 'retry');
+}
+
+async function togglePassthrough(on) {
+  updateModeBadge(on); // 先更新 UI，失败再回滚
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ proxy: { passthrough: on } }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'failed');
+    toast(on ? '已切换到透传模式（不重试）' : '已切换到拦截重试模式');
+  } catch (e) {
+    toast('切换失败: ' + e.message, false);
+    updateModeBadge(!on); // 回滚
+    document.getElementById('cfg-passthrough').checked = !on;
+  }
+}
+
+function renderChips(containerId, arr) {
+  const c = document.getElementById(containerId);
+  c.innerHTML = '';
+  arr.forEach((v, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.innerHTML = `<span>${v}</span>`;
+    const btn = document.createElement('button');
+    btn.textContent = '×';
+    btn.onclick = () => { arr.splice(i, 1); renderChips(containerId, arr); };
+    chip.appendChild(btn);
+    c.appendChild(chip);
+  });
+  c.dataset.values = JSON.stringify(arr);
+}
+
+function readChips(containerId) {
+  return JSON.parse(document.getElementById(containerId).dataset.values || '[]');
+}
+
+function updateBackoffPreview() {
+  const sec = Number(document.getElementById('cfg-backoffSec').value) || 0;
+  const max = Number(document.getElementById('cfg-backoffMaxSec').value) || 0;
+  const n = Number(document.getElementById('cfg-maxAttempts').value) || 0;
+  const seq = [];
+  // 预览前 8 个，避免 1000 次时刷屏
+  const show = Math.min(n - 1, 8);
+  for (let i = 0; i < show; i++) {
+    const v = Math.min(sec * 2 ** i, max);
+    seq.push(fmtSec(v));
+  }
+  if (n - 1 > show) seq.push('…（封顶 ' + fmtSec(max) + '）');
+  document.getElementById('backoff-preview').textContent = seq.length ? seq.join(' → ') : '（无重试）';
+}
+function fmtSec(s) {
+  if (s >= 1) return (Math.round(s * 10) / 10) + 's';
+  return Math.round(s * 1000) + 'ms';
+}
+
+['cfg-maxAttempts', 'cfg-backoffSec', 'cfg-backoffMaxSec'].forEach((id) => {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById(id).addEventListener('input', updateBackoffPreview);
+  });
+});
+
+// 添加状态码
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('add-status').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.value.trim()) {
+      const arr = readChips('cfg-retryOnStatus');
+      arr.push(Number(e.target.value));
+      renderChips('cfg-retryOnStatus', arr);
+      e.target.value = '';
+    }
+  });
+  document.getElementById('add-bodycode').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.value.trim()) {
+      const arr = readChips('cfg-retryOnBodyErrorCode');
+      arr.push(Number(e.target.value));
+      renderChips('cfg-retryOnBodyErrorCode', arr);
+      e.target.value = '';
+    }
+  });
+  // 初始加载
+  showTab('config');
+});
+
+async function saveConfig() {
+  const proxy = {
+    maxAttempts: Number(document.getElementById('cfg-maxAttempts').value),
+    backoffSec: Number(document.getElementById('cfg-backoffSec').value),
+    backoffMaxSec: Number(document.getElementById('cfg-backoffMaxSec').value),
+    retryOnStatus: readChips('cfg-retryOnStatus'),
+    retryOnBodyErrorCode: readChips('cfg-retryOnBodyErrorCode'),
+  };
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ proxy }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'save failed');
+    toast('重试策略已保存，下个请求即生效');
+    loadConfig();
+  } catch (e) {
+    toast('保存失败: ' + e.message, false);
+  }
+}
+
+async function saveUpstream() {
+  const upstream = {
+    baseUrl: document.getElementById('cfg-upstream').value.trim(),
+    model: document.getElementById('cfg-model').value.trim(),
+    smallFastModel: document.getElementById('cfg-smallFastModel').value.trim(),
+    timeoutSec: Number(document.getElementById('cfg-timeoutSec').value),
+    token: document.getElementById('cfg-token').value, // 空字符串=不改
+  };
+  try {
+    const r = await fetch('/api/upstream', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ upstream }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'save failed');
+    toast('上游配置已保存，下个请求即生效');
+    loadConfig();
+  } catch (e) {
+    toast('保存失败: ' + e.message, false);
+  }
+}
+
+// ── 重试记录页 ──────────────────────────────────────────
+function currentMode() {
+  const el = document.querySelector('input[name="traceMode"]:checked');
+  return el ? el.value : 'all';
+}
+function onModeChange() {
+  // 切档清掉增量游标，从头查
+  lastSince = null;
+  refreshTraces();
+}
+async function refreshTraces() {
+  const mode = currentMode();
+  const url = '/api/traces?limit=200&mode=' + encodeURIComponent(mode) + (lastSince ? '&since=' + encodeURIComponent(lastSince) : '');
+  try {
+    const list = await (await fetch(url)).json();
+    lastListCache = list;
+    renderTraces(list);
+  } catch (e) {
+    document.getElementById('trace-tbody').innerHTML = `<tr><td colspan="8" class="empty">加载失败: ${e.message}</td></tr>`;
+  }
+}
+async function openLogsDir() {
+  try {
+    const r = await (await fetch('/api/open-logs', { method: 'POST' })).json();
+    if (!r.ok) toast('打开失败: ' + (r.error || '未知错误'), false);
+    else toast('已在系统文件管理器打开: ' + r.dir);
+  } catch (e) {
+    toast('打开失败: ' + e.message, false);
+  }
+}
+async function killProxy() {
+  if (!confirm('关闭代理监听？宿主窗口心跳会在 2s 内自动重起。\n注意：重起的是宿主内存里已缓存的代码，改了 proxy 代码不会因此重新加载（要加载新代码需 Reload 宿主窗口）。')) return;
+  try {
+    const r = await (await fetch('/api/kill', { method: 'POST' })).json();
+    if (r.ok) {
+      toast('已关闭代理监听，宿主将自动重起');
+      setTimeout(refreshTraces, 2500);
+    } else {
+      toast('重启失败: ' + (r.error || '未知错误'), false);
+    }
+  } catch (e) {
+    toast('重启失败: ' + e.message, false);
+  }
+}
+
+// 展开状态按 id 记忆：自动刷新重渲染后恢复展开
+const expandedIds = new Set();
+
+function renderTraces(list) {
+  const tb = document.getElementById('trace-tbody');
+  if (!list.length) {
+    tb.innerHTML = '<tr><td colspan="8" class="empty">暂无记录</td></tr>';
+    return;
+  }
+  const html = [];
+  for (const t of list) {
+    const atts = Array.isArray(t.attempts) ? t.attempts : [];
+    const attCount = atts.length;
+    const time = fmtTime(t.startedAt);
+    const sc = statusClass(t.lastErrorStatus ?? (t.finalStatus >= 200 && t.finalStatus < 300 ? t.finalStatus : t.finalStatus));
+    const scText = t.lastErrorStatus ? t.lastErrorStatus : (t.finalStatus || '-');
+    const badge = outcomeBadge(t.outcome);
+    const expanded = expandedIds.has(t.id);
+    const arrow = attCount > 1 ? (expanded ? '▾' : '▸') : '<span style="display:inline-block;width:1em"></span>';
+    html.push(`<tr class="row" data-id="${t.id}">
+      <td class="time"><span class="arrow" onclick="event.stopPropagation();toggleExpand('${t.id}')" style="cursor:pointer;display:inline-block;width:1.2em">${arrow}</span>${time}</td>
+      <td class="id">${t.id}</td>
+      <td>${t.sourceIp}</td>
+      <td class="id" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.method} ${t.path}</td>
+      <td class="${sc}">${scText}</td>
+      <td>${attCount}</td>
+      <td>${fmtMs(t.totalMs)}</td>
+      <td>${badge}</td>
+    </tr>`);
+    if (expanded && attCount > 1) {
+      html.push(`<tr class="sub-row" data-id="${t.id}"><td colspan="8" class="sub-cell">${renderAttempts(atts)}</td></tr>`);
+    }
+  }
+  tb.innerHTML = html.join('');
+  // 主行点击仍进详情（箭头已 stopPropagation 不触发展开/详情冲突）
+  tb.querySelectorAll('tr.row').forEach((tr) => {
+    tr.onclick = () => openDetail(tr.dataset.id);
+  });
+}
+
+function renderAttempts(atts) {
+  // 每条 attempt：序号 → 状态码(上色) (耗时) [等待] verdict reason
+  const lines = atts.map((a) => {
+    const sc = statusClass(a.status);
+    const statusText = a.status === 0 ? 'NETERR' : (a.status || '-');
+    const wait = a.backoffMs != null ? ` <span class="muted">等 ${fmtMs(a.backoffMs)}</span>` : '';
+    const verdictTag = a.verdict === 'success' ? '<span class="vtag v-success">success</span>'
+      : a.verdict === 'retryable' ? '<span class="vtag v-retry">retryable</span>'
+      : a.verdict === 'not-retryable' ? '<span class="vtag v-noretry">not-retryable</span>'
+      : a.verdict === 'passthrough' ? '<span class="vtag v-pass">passthrough</span>'
+      : `<span class="vtag">${a.verdict || ''}</span>`;
+    const reason = a.reason ? ` <span class="muted">${escapeHtml(a.reason)}</span>` : '';
+    return `<div class="att-line"><span class="att-num">attempt ${a.attempt}</span><span class="${sc}">→ ${statusText}</span> <span class="muted">(${fmtMs(a.elapsedMs)})</span>${wait} ${verdictTag}${reason}</div>`;
+  });
+  return `<div class="att-list">${lines.join('')}</div>`;
+}
+
+function toggleExpand(id) {
+  if (expandedIds.has(id)) expandedIds.delete(id);
+  else expandedIds.add(id);
+  // 不全量刷新，只重渲染当前 tbody 里的行（数据没变，只改展开态）
+  // 但简单起见直接 refreshTraces 也可；这里用轻量重渲染避免闪动
+  const tb = document.getElementById('trace-tbody');
+  // 找到该 id 的主行和可能的子行，局部替换
+  const mainRow = tb.querySelector(`tr.row[data-id="${id}"]`);
+  if (!mainRow) return;
+  const next = mainRow.nextElementSibling;
+  const wasExpanded = next && next.classList.contains('sub-row') && next.dataset.id === id;
+  const expanded = expandedIds.has(id);
+  // 更新箭头
+  const arrowEl = mainRow.querySelector('.arrow');
+  if (arrowEl) arrowEl.textContent = expanded ? '▾' : '▸';
+  if (expanded && !wasExpanded) {
+    // 插入子行：需要这条的 attempts 数据。从最近一次 list 缓存里取。
+    const t = lastListCache.find((x) => x.id === id);
+    if (t && Array.isArray(t.attempts) && t.attempts.length > 1) {
+      const sub = document.createElement('tr');
+      sub.className = 'sub-row';
+      sub.dataset.id = id;
+      sub.innerHTML = `<td colspan="8" class="sub-cell">${renderAttempts(t.attempts)}</td>`;
+      mainRow.after(sub);
+    }
+  } else if (!expanded && wasExpanded) {
+    next.remove();
+  }
+}
+
+let lastListCache = [];
+
+function toggleAutoRefresh() {
+  if (document.getElementById('autoRefresh').checked) {
+    refreshTimer = setInterval(refreshTraces, 2000);
+  } else {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+async function openDetail(id) {
+  try {
+    const t = await (await fetch('/api/traces/' + id)).json();
+    d_trace = t;
+    document.getElementById('d-title').textContent = '请求 #' + t.id;
+    document.getElementById('d-meta').innerHTML = `
+      <span class="k">源 IP</span><span class="v">${t.sourceIp}</span>
+      <span class="k">方法/路径</span><span class="v">${t.method} ${t.path}</span>
+      <span class="k">发出时间</span><span class="v">${fmtTime(t.startedAt)}</span>
+      <span class="k">返回时间</span><span class="v">${fmtTime(t.endedAt)}</span>
+      <span class="k">总耗时</span><span class="v">${fmtMs(t.totalMs)}</span>
+      <span class="k">运行模式</span><span class="v">${t.configSnapshot?.passthrough ? '透传（不重试）' : '拦截重试'}</span>
+      <span class="k">最终状态</span><span class="v">${t.finalStatus} (${t.outcome})</span>
+      <span class="k">尝试次数</span><span class="v">${t.attempts.length}</span>
+    `;
+    document.getElementById('d-req').textContent = prettyJson(t.requestBody);
+    document.getElementById('d-resp').textContent = prettyJson(t.responseBody);
+    const ac = document.getElementById('d-attempts');
+    ac.innerHTML = '';
+    for (const a of t.attempts) {
+      const div = document.createElement('div');
+      div.className = 'attempt-line';
+      const sc = statusClass(a.status);
+      const wait = a.backoffMs != null ? `等待 ${a.backoffMs}ms` : '';
+      div.innerHTML = `<span class="num">attempt ${a.attempt}</span><span class="${sc}">→ ${a.status || 'NETERR'}</span> (${a.elapsedMs}ms) ${wait} <span style="color:var(--muted)">${a.reason}</span>`;
+      ac.appendChild(div);
+    }
+    document.getElementById('detail-overlay').classList.add('show');
+  } catch (e) {
+    toast('加载详情失败: ' + e.message, false);
+  }
+}
+function closeDetail() {
+  document.getElementById('detail-overlay').classList.remove('show');
+}
+
+// ── 工具 ────────────────────────────────────────────────
+function fmtTime(iso) {
+  if (!iso) return '-';
+  // 统一显示中国时间（UTC+8），不依赖浏览器/系统时区
+  const t = new Date(iso).getTime() + 8 * 3600 * 1000;
+  const d = new Date(t);
+  const pad = (n, l = 2) => String(n).padStart(l, '0');
+  return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`;
+}
+function fmtMs(ms) {
+  if (ms == null) return '-';
+  if (ms < 1000) return ms + 'ms';
+  return (ms / 1000).toFixed(1) + 's';
+}
+function statusClass(s) {
+  if (!s || s === 0) return 'status-neterr';
+  if (s >= 200 && s < 300) return 'status-2xx';
+  if (s >= 400 && s < 500) return 'status-4xx';
+  if (s >= 500) return 'status-5xx';
+  return '';
+}
+function outcomeBadge(o) {
+  const map = {
+    'success-direct': ['直通', 'direct'],
+    'success-after-retry': ['重试后成功', 'after-retry'],
+    'success': ['成功', 'success'],
+    'failed': ['失败', 'failed'],
+    'pass-through': ['透传', 'pass'],
+    'passthrough': ['透传', 'passthrough'],
+    'passed-to-client': ['交CC', 'pass'],
+  };
+  const [text, cls] = map[o] || [o, 'direct'];
+  return `<span class="badge ${cls}">${text}</span>`;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function prettyJson(s) {
+  if (!s) return '(empty)';
+  try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
+}
+function copyText(s) {
+  navigator.clipboard.writeText(s || '').then(() => toast('已复制'));
+}
+</script>
+</body>
+</html>

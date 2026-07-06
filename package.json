@@ -1,0 +1,147 @@
+{
+  "name": "cc-switch",
+  "displayName": "Claude Code Switch + LLM Proxy",
+  "description": "管理 Claude Code 配置并切换；每条配置可选直连或通过本地代理（代理只重试 Claude Code 处理不了的 503+10310，其余透传交给 Claude Code）。",
+  "version": "0.7.0",
+  "publisher": "zaczh",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cc-switch",
+          "title": "Claude Code Switch Setting",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "cc-switch": [
+        {
+          "id": "cc-switch.configs",
+          "name": "LLM Configs"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "cc-switch.newConfig",
+          "when": "view == cc-switch.configs",
+          "group": "navigation"
+        },
+        {
+          "command": "cc-switch.refresh",
+          "when": "view == cc-switch.configs",
+          "group": "navigation"
+        },
+        {
+          "command": "cc-switch.exportConfigs",
+          "when": "view == cc-switch.configs"
+        },
+        {
+          "command": "cc-switch.importConfigs",
+          "when": "view == cc-switch.configs"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "cc-switch.switchConfig",
+          "when": "view == cc-switch.configs && viewItem == config",
+          "group": "inline@1"
+        },
+        {
+          "command": "cc-switch.editConfig",
+          "when": "view == cc-switch.configs && viewItem == config",
+          "group": "inline@2"
+        },
+        {
+          "command": "cc-switch.deleteConfig",
+          "when": "view == cc-switch.configs && viewItem == config",
+          "group": "inline@3"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "cc-switch.newConfig",
+        "title": "New LLM Config",
+        "icon": "$(add)"
+      },
+      {
+        "command": "cc-switch.editConfig",
+        "title": "Edit",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "cc-switch.switchConfig",
+        "title": "Switch to This Config",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "cc-switch.deleteConfig",
+        "title": "Delete",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "cc-switch.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "cc-switch.openView",
+        "title": "Open Claude Code Switch Setting"
+      },
+      {
+        "command": "cc-switch.openProxyUI",
+        "title": "LLM 代理: 打开控制台（重试参数 + Trace）",
+        "category": "CC Switch"
+      },
+      {
+        "command": "cc-switch.killProxy",
+        "title": "LLM 代理: 重启代理（关闭监听，宿主心跳自动重起）",
+        "category": "CC Switch"
+      },
+      {
+        "command": "cc-switch.exportConfigs",
+        "title": "Export Configs",
+        "icon": "$(export)"
+      },
+      {
+        "command": "cc-switch.importConfigs",
+        "title": "Import Configs",
+        "icon": "$(cloud-download)"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Code Switch Setting",
+      "properties": {
+        "cc-switch.configFilePath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Override the Claude Code settings.json path. Leave empty to auto-detect (`~/.claude/settings.json` on all platforms, including WSL)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.4.0"
+  }
+}
