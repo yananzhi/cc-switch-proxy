@@ -265,3 +265,64 @@ realTest('I. 真实旧裸日志补建 idx + 详情精确读 + 二次加速', asy
   assert.equal(list2.length, list1.length, '二次 list 数量一致');
 });
 
+// ── J: 时间窗口成功统计 stats() ───────────────────────────
+// stats 按 startedAt 时间窗口统计 finalStatus 2xx 的成功命令数。
+// 关键：只扫 idx 摘要、不读 body；成功=finalStatus 2xx；窗口边界 [now-w*3600s, now]。
+
+test('J1. stats 按 startedAt 窗口统计 2xx 成功数', async () => {
+  const dir = newTmpDir('stats');
+  ts.setLogDir(dir);
+  const now = Date.now();
+  // 用真实"现在"附近的时刻写记录，避免 cleanupOld 误删（它只删 7 天前，今天的安全）
+  const iso = (offsetMs) => new Date(now + offsetMs).toISOString();
+  // 3 条成功（200）、1 条失败（503），都在最近 1 小时内
+  ts.append(makeTrace({ id: 'J1', finalStatus: 200, startedAt: iso(-5 * 60_000) }));     // 5 分钟前，成功
+  ts.append(makeTrace({ id: 'J2', finalStatus: 200, startedAt: iso(-20 * 60_000) }));   // 20 分钟前，成功
+  ts.append(makeTrace({ id: 'J3', finalStatus: 200, startedAt: iso(-50 * 60_000) }));   // 50 分钟前，成功
+  ts.append(makeTrace({ id: 'J4', finalStatus: 503, startedAt: iso(-30 * 60_000) }));   // 30 分钟前，失败
+  // 1 条 90 分钟前的成功（超出 1 小时，在 2 小时窗口内）
+  ts.append(makeTrace({ id: 'J5', finalStatus: 200, startedAt: iso(-90 * 60_000) }));
+
+  const r = await ts.stats({ windows: [1, 2] });
+  assert.ok(r.windows.length === 2);
+  const w1 = r.windows.find(w => w.hours === 1);
+  const w2 = r.windows.find(w => w.hours === 2);
+  assert.ok(w1 && w2, '应返回 1h 与 2h 窗口');
+  // 1 小时内：J1/J2/J3/J4 = 4 条，成功 3（J1/J2/J3）
+  assert.equal(w1.total, 4, '1h 内 total=4');
+  assert.equal(w1.success, 3, '1h 内 success=3');
+  // 2 小时内：再加 J5 = 5 条，成功 4
+  assert.equal(w2.total, 5, '2h 内 total=5');
+  assert.equal(w2.success, 4, '2h 内 success=4');
+  // fromTs 应为 now - hours*3600*1000
+  assert.ok(Math.abs(w1.fromTs - (now - 3600_000)) < 3000, '1h fromTs 近似正确');
+});
+
+test('J2. stats 窗口按小时升序、空目录返回 0', async () => {
+  const dir = newTmpDir('stats-empty');
+  ts.setLogDir(dir);
+  const r = await ts.stats({ windows: [24, 1, 5] });
+  assert.deepEqual(r.windows.map(w => w.hours), [1, 5, 24], '应升序');
+  for (const w of r.windows) {
+    assert.equal(w.success, 0);
+    assert.equal(w.total, 0);
+  }
+});
+
+test('J3. stats 成功=2xx，3xx/4xx/5xx/0 都不算成功', async () => {
+  const dir = newTmpDir('stats-status');
+  ts.setLogDir(dir);
+  const now = Date.now();
+  const iso = (m) => new Date(now - m * 60_000).toISOString();
+  ts.append(makeTrace({ id: 'K1', finalStatus: 200, startedAt: iso(1) }));   // 成功
+  ts.append(makeTrace({ id: 'K2', finalStatus: 201, startedAt: iso(2) }));  // 成功（201 也算 2xx）
+  ts.append(makeTrace({ id: 'K3', finalStatus: 301, startedAt: iso(3) }));  // 3xx 不算
+  ts.append(makeTrace({ id: 'K4', finalStatus: 403, startedAt: iso(4) }));  // 4xx 不算
+  ts.append(makeTrace({ id: 'K5', finalStatus: 503, startedAt: iso(5) }));  // 5xx 不算
+  ts.append(makeTrace({ id: 'K6', finalStatus: 0, startedAt: iso(6) }));    // 网络错误 0 不算
+  const r = await ts.stats({ windows: [1] });
+  const w = r.windows[0];
+  assert.equal(w.total, 6, '6 条');
+  assert.equal(w.success, 2, '只 200/201 算成功=2');
+});
+

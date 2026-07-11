@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
+import { ProxyToggleStore } from './proxyToggle';
 
 const HEARTBEAT_MS = 2000;
 const HEALTH_TIMEOUT_MS = 500;
@@ -60,14 +61,16 @@ export class ProxyHost {
     private readonly logsConfigPath: string;
     private readonly extensionPath: string;
     private readonly output: vscode.OutputChannel;
+    private readonly toggle: ProxyToggleStore;
 
-    constructor(context: vscode.ExtensionContext, output: vscode.OutputChannel) {
+    constructor(context: vscode.ExtensionContext, output: vscode.OutputChannel, toggle: ProxyToggleStore) {
         this.extensionPath = context.extensionPath;
         this.configPath = path.join(context.globalStorageUri.fsPath, 'proxy-config.json');
         this.logsDir = path.join(context.globalStorageUri.fsPath, 'logs');
         // logs-config.json 也放 globalStorage：存用户配置的 logsDir，代理重启后能重新读到
         this.logsConfigPath = path.join(context.globalStorageUri.fsPath, 'logs-config.json');
         this.output = output;
+        this.toggle = toggle;
 
         this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
         this.statusBar.command = 'cc-switch.openProxyUI';
@@ -83,6 +86,8 @@ export class ProxyHost {
             if (!fs.existsSync(this.configPath)) {
                 fs.writeFileSync(this.configPath, JSON.stringify(DEFAULT_PROXY_CONFIG, null, 2) + '\n', 'utf8');
             }
+            // backup proxy 开关为纯内存态（默认允许），tryBecomeHost 内部会再尊重它。
+            // 开关关闭时本窗口不启动代理、心跳不接管；打开时复用其他窗口或自己起。
             await this.tryBecomeHost();
             this.heartbeatTimer = setInterval(() => { void this.heartbeatTick(); }, HEARTBEAT_MS);
         } catch (e: unknown) {
@@ -112,9 +117,57 @@ export class ProxyHost {
         }
     }
 
-    /** 确保代理在跑（不通则本窗口起；EADDRINUSE 则当从机） */
+    /** 确保代理在跑（不通则本窗口起；EADDRINUSE 则当从机）。开关关闭时抛错让调用方提示。 */
     async ensureRunning(): Promise<void> {
+        if (!this.toggle.isEnabled()) {
+            throw new Error('backup proxy 已被本窗口禁用（树视图开关为关）。请在侧边栏打开开关后再切到代理模式配置。');
+        }
         await this.tryBecomeHost();
+    }
+
+    /**
+     * 切换本窗口 backup proxy 开关。
+     * - 开→关：若本窗口是宿主，停掉本窗口进程；心跳此后不再接管（本窗口变旁观者）。
+     *           停掉后其他保活从机窗口会在 2s 内接管 —— 预期行为，本开关只控本窗口。
+     * - 关→开：探 11434 —— 有其他窗口在跑则复用保心跳、自己不起；没有则自己起。
+     * 返回切换后的状态字符串供 UI 提示。
+     */
+    async setEnabled(on: boolean): Promise<{ enabled: boolean; message: string }> {
+        const prev = this.toggle.isEnabled();
+        this.toggle.setEnabled(on);
+        if (on === prev) {
+            // 状态未变，仍刷新状态栏以反映真实运行态
+            this.updateStatusBar();
+            return { enabled: on, message: on ? 'backup proxy 已是开启状态' : 'backup proxy 已是关闭状态' };
+        }
+        if (!on) {
+            // 开→关：停本窗口进程
+            if (this.handle) {
+                this.log('backup proxy 开关→关，停掉本窗口代理进程（其他窗口心跳将接管）');
+                try { await this.handle.stop(); } catch {}
+                this.handle = null;
+            } else {
+                this.log('backup proxy 开关→关（本窗口本非宿主，无需停进程）');
+            }
+            this.updateStatusBar();
+            return { enabled: false, message: '已禁用本窗口 backup proxy。若其他窗口保活，它们会接管。' };
+        }
+        // 关→开：尝试成为宿主（复用/启动）
+        this.log('backup proxy 开关→开，尝试复用或启动');
+        await this.tryBecomeHost();
+        this.updateStatusBar();
+        const port = this.getPort();
+        const runningElsewhere = !this.handle && await healthz(port);
+        return {
+            enabled: true,
+            message: this.handle
+                ? `已在本窗口启动 backup proxy (127.0.0.1:${this.handle.port})`
+                : (runningElsewhere ? '已复用其他窗口的 backup proxy（本窗口保心跳）' : '已允许本窗口启动 backup proxy'),
+        };
+    }
+
+    isToggleEnabled(): boolean {
+        return this.toggle.isEnabled();
     }
 
     /**
@@ -186,6 +239,7 @@ export class ProxyHost {
     }
 
     private async tryBecomeHost(): Promise<void> {
+        if (!this.toggle.isEnabled()) return; // 开关关闭：本窗口不启动也不接管
         if (this.handle) return; // 已是宿主
         const port = this.getPort();
         if (await healthz(port)) return; // 别的窗口在跑
@@ -220,6 +274,16 @@ export class ProxyHost {
     }
 
     private async heartbeatTick(): Promise<void> {
+        // 开关关闭：本窗口不持代理、不接管、只更新状态栏。保持空转心跳以便随时感知开关重开。
+        if (!this.toggle.isEnabled()) {
+            // 防御：若本窗口仍持着 handle（理论不会，setEnabled(false) 已 stop），强制清掉
+            if (this.handle) {
+                try { await this.handle.stop(); } catch {}
+                this.handle = null;
+            }
+            this.updateStatusBar();
+            return;
+        }
         const port = this.getPort();
         if (this.handle) {
             // 宿主自检
@@ -240,6 +304,11 @@ export class ProxyHost {
     }
 
     private updateStatusBar(): void {
+        if (!this.toggle.isEnabled()) {
+            this.statusBar.text = '$(circle-slash) 代理:本窗口禁用';
+            this.statusBar.tooltip = 'backup proxy 已在本窗口禁用（树视图开关为关）。\n其他窗口若保活会接管；本窗口不启动、不接管。\n点击打开控制台（若代理在别处运行）';
+            return;
+        }
         if (this.handle) {
             this.statusBar.text = '$(cloud) 代理:本窗口运行';
             this.statusBar.tooltip = `LLM 代理在本窗口运行 (127.0.0.1:${this.handle.port})\n点击打开控制台`;
@@ -248,6 +317,7 @@ export class ProxyHost {
             const port = this.getPort();
             healthz(port).then((up) => {
                 if (this.handle) return;
+                if (!this.toggle.isEnabled()) return; // 期间被禁用了，不覆盖禁用态
                 this.statusBar.text = up ? '$(cloud) 代理:其他窗口运行' : '$(cloud) 代理:未运行';
                 this.statusBar.tooltip = up
                     ? `代理在其他窗口运行 (127.0.0.1:${port})\n点击打开控制台`

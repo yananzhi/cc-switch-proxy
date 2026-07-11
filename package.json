@@ -45,6 +45,16 @@
           "group": "navigation"
         },
         {
+          "command": "cc-switch.toggleProxyBackupOn",
+          "when": "view == cc-switch.configs && !cc-switch.proxyToggleEnabled",
+          "group": "navigation"
+        },
+        {
+          "command": "cc-switch.toggleProxyBackupOff",
+          "when": "view == cc-switch.configs && cc-switch.proxyToggleEnabled",
+          "group": "navigation"
+        },
+        {
           "command": "cc-switch.exportConfigs",
           "when": "view == cc-switch.configs"
         },
@@ -110,6 +120,23 @@
         "command": "cc-switch.killProxy",
         "title": "LLM 代理: 重启代理（关闭监听，宿主心跳自动重起）",
         "category": "CC Switch"
+      },
+      {
+        "command": "cc-switch.toggleProxyBackup",
+        "title": "LLM 代理: 切换本窗口 backup proxy 开关",
+        "category": "CC Switch"
+      },
+      {
+        "command": "cc-switch.toggleProxyBackupOn",
+        "title": "LLM 代理: 开启本窗口 backup proxy",
+        "icon": "$(debug-start)",
+        "enablement": "!cc-switch.proxyToggleEnabled"
+      },
+      {
+        "command": "cc-switch.toggleProxyBackupOff",
+        "title": "LLM 代理: 关闭本窗口 backup proxy",
+        "icon": "$(debug-stop)",
+        "enablement": "cc-switch.proxyToggleEnabled"
       },
       {
         "command": "cc-switch.exportConfigs",

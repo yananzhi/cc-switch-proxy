@@ -263,6 +263,22 @@ async function handleApi(req, res, urlPath) {
     sendJson(res, 200, await traceStore.list({ since, mode, limit }));
     return;
   }
+  // 时间窗口成功统计：windows=1,5,24 → 最近1h/5h/1天的成功命令数。
+  // 前端可自定义窗口（逗号分隔的小时数）。成功=finalStatus 2xx。
+  if (req.method === 'GET' && urlPath === '/api/stats') {
+    const u = new URL('http://x' + req.url);
+    const wRaw = u.searchParams.get('windows') || '1,5,24';
+    // 上限 168h（7天）= trace 保留期，超过的数据已被 cleanupOld 删掉，统计无意义且会撑爆 days 扫描循环
+    const MAX_HOURS = 168;
+    const windows = String(wRaw)
+      .split(',')
+      .map((s) => Number(s))
+      .filter((n) => Number.isFinite(n) && n > 0 && n <= MAX_HOURS)
+      .slice(0, 12); // 防止前端塞几百个窗口拖垮扫描
+    const ws = windows.length ? windows : [1, 5, 24];
+    sendJson(res, 200, await traceStore.stats({ windows: ws }));
+    return;
+  }
   const m = urlPath.match(/^\/api\/traces\/([^/]+)$/);
   if (req.method === 'GET' && m) {
     const r = await traceStore.getById(m[1]);

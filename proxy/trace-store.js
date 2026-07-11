@@ -403,6 +403,79 @@ export async function list({ since, mode = 'all', onlyRetries = false, limit = 2
   });
 }
 
+// 按时间窗口统计「成功执行」的命令数量。
+//
+// 入参 windows: 小时数数组，如 [1, 5, 24] = 最近1小时/5小时/1天。前端可自定义。
+// 对每个窗口 w：统计 startedAt 落在 [now - w*3600s, now] 区间、且最终交付成功（finalStatus 为 2xx）的 trace 数。
+// 只扫 idx 摘要（小、快），不碰 body。用 startedAt（请求发出时刻）做时间锚点，符合「按时间统计最近N小时执行成功的命令」。
+//
+// 返回：
+//   {
+//     now: <ISO>,                      // 统计基准时刻（中国时间显示用，前端已统一 UTC+8）
+//     windows: [
+//       { hours: 1,  success: 12, total: 15, fromTs: <ms> },
+//       { hours: 5,  success: 40, total: 50, fromTs: <ms> },
+//       { hours: 24, success: 99, total: 120, fromTs: <ms> },
+//     ]
+//   }
+//   - success: 该窗口内 finalStatus ∈ [200,300) 的 trace 数
+//   - total:   该窗口内全部 trace 数（含失败/透传）
+//   - fromTs:  窗口起始时间戳（ms），前端可显示「自 xx:xx 起」
+// 成功判定：finalStatus 2xx。透传模式下 outcome='passthrough' 但 finalStatus 2xx 也算成功
+// （因为最终给 CC 的是 2xx，命令确实成功执行）。网络错误 finalStatus=0 不算。
+export async function stats({ windows = [1, 5, 24] } = {}) {
+  cleanupOld();
+  const nowMs = Date.now();
+  // 窗口值防御性夹取：超过 trace 保留期（7天=168h）的窗口无意义（数据已删），且会撑爆 days 扫描循环。
+  const MAX_HOURS = RETENTION_DAYS * 24;
+  const seen = new Set();
+  const ws = windows
+    .filter((h) => Number.isFinite(h) && h > 0)
+    .map((h) => Math.min(h, MAX_HOURS))
+    .filter((h) => { // 去重（0.001h≈3.6s 容差），避免 ?windows=1,1 渲染两个重复卡片
+      const key = Math.round(h * 1000);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  if (!ws.length) return { now: new Date(nowMs).toISOString(), windows: [] };
+  // 求最大窗口，决定要扫多少天：向上取整天数 +1 天余量，覆盖跨天边界
+  const maxHours = Math.max(1, ...ws);
+  const maxDaySpan = Math.min(Math.ceil(maxHours / 24) + 1, RETENTION_DAYS); // 扫不出保留期之外
+
+  // 收集每个窗口的计数桶
+  const buckets = ws.map((h) => ({ hours: h, fromTs: nowMs - h * 3600 * 1000, success: 0, total: 0 }));
+
+  // 扫最近 maxDaySpan 天的 idx
+  const days = [];
+  for (let i = 0; i < maxDaySpan; i++) {
+    const d = new Date(nowMs - i * DAY_MS);
+    days.push(dateStr(d));
+  }
+
+  for (const day of days) {
+    const rows = await readDayIdx(day);
+    for (const r of rows) {
+      const t = new Date(r.startedAt).getTime();
+      if (!Number.isFinite(t)) continue;
+      for (const b of buckets) {
+        if (t >= b.fromTs && t <= nowMs) {
+          b.total++;
+          const s = r.finalStatus;
+          if (Number.isFinite(s) && s >= 200 && s < 300) b.success++;
+        }
+      }
+    }
+  }
+
+  // 按 hours 升序输出，便于前端按时间窗从小到大排列
+  buckets.sort((a, b) => a.hours - b.hours);
+  return {
+    now: new Date(nowMs).toISOString(),
+    windows: buckets.map((b) => ({ hours: b.hours, success: b.success, total: b.total, fromTs: b.fromTs })),
+  };
+}
+
 function preview(s) {
   if (!s) return '';
   return s.length > 200 ? s.slice(0, 200) + '…' : s;

@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import type { LLMConfig } from './types';
 import { ConfigStore } from './configStore';
 import { ActiveStateStore } from './activeState';
+import { ProxyToggleStore } from './proxyToggle';
 import { ProxyHost } from './proxyHost';
 import { ConfigTreeProvider, findActiveConfig, getOverridePath, getConfigFromNode } from './treeProvider';
 import { WebviewEditor } from './webviewEditor';
@@ -14,9 +15,10 @@ let proxyHost: ProxyHost | null = null;
 export function activate(context: vscode.ExtensionContext): void {
     const store = new ConfigStore(context.globalStorageUri);
     const activeState = new ActiveStateStore(context.globalStorageUri);
+    const proxyToggle = new ProxyToggleStore();
     const output = vscode.window.createOutputChannel('CC Switch + Proxy');
     context.subscriptions.push(output);
-    proxyHost = new ProxyHost(context, output);
+    proxyHost = new ProxyHost(context, output, proxyToggle);
 
     const treeProvider = new ConfigTreeProvider(store, activeState);
 
@@ -373,7 +375,40 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
     );
 
-    // 启动进程内代理（常驻 + 心跳 + 单例）
+    // 同步「backup proxy 开关」上下文键，供树视图标题栏按钮用 when 子句切换开/关图标
+    async function syncProxyToggleContext(): Promise<void> {
+        const enabled = proxyToggle.isEnabled();
+        await vscode.commands.executeCommand('setContext', 'cc-switch.proxyToggleEnabled', enabled);
+    }
+
+    // backup proxy 本窗口开关（树视图标题栏按钮 + 命令面板）。只控本窗口，不管其他窗口是否接管。
+    // 关：本窗口若是宿主则停进程，此后心跳不接管。开：复用其他窗口或自己起。
+    context.subscriptions.push(
+        vscode.commands.registerCommand('cc-switch.toggleProxyBackup', async () => {
+            if (!proxyHost) {
+                void vscode.window.showWarningMessage('代理尚未初始化');
+                return;
+            }
+            const next = !proxyHost.isToggleEnabled();
+            const result = await proxyHost.setEnabled(next);
+            await syncProxyToggleContext();
+            if (result.enabled) {
+                void vscode.window.showInformationMessage(result.message);
+            } else {
+                void vscode.window.showWarningMessage(result.message);
+            }
+        }),
+        // 标题栏两个图标按钮各自指向同一 toggle 逻辑（按钮本身是开/关的视觉态）
+        vscode.commands.registerCommand('cc-switch.toggleProxyBackupOn', () => {
+            void vscode.commands.executeCommand('cc-switch.toggleProxyBackup');
+        }),
+        vscode.commands.registerCommand('cc-switch.toggleProxyBackupOff', () => {
+            void vscode.commands.executeCommand('cc-switch.toggleProxyBackup');
+        }),
+    );
+
+    // 启动进程内代理（常驻 + 心跳 + 单例）。开关是纯内存态默认开，先同步设上下文键避免标题栏图标闪烁。
+    void syncProxyToggleContext();
     void proxyHost?.activate();
 
     void refresh();

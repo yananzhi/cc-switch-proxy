@@ -144,10 +144,17 @@
   .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
   .toolbar label { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .toolbar .spacer { flex: 1; }
-  table { width: 100%; border-collapse: collapse; }
+  /* table-layout:fixed + colgroup：让表头与数据行严格共享同一套列宽（auto 布局下 th/td
+     宽度算法不一致会整体错位）。表格直接放在 .card 里，不要套 overflow 容器——
+     外层 overflow 容器会让 fixed+colgroup 对 tbody 失效（表头遵守、数据行退化成按内容算宽）。 */
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
-  tr.row { cursor: pointer; }
+  /* 表格数据行叫 .row，但配置页 .row 是 display:flex（第60行）。flex 会把 <tr> 变成 flex 容器、
+     内部 <td> 退化为 block，脱离表格列布局 → 表头与数据行两套坐标系、整体错位。
+     这里显式恢复 table-row/table-cell，让数据行重新参与 table-layout 列宽分配。 */
+  tr.row { display: table-row; cursor: pointer; }
+  tr.row td { display: table-cell; }
   tr.row:hover { background: var(--panel2); }
   td .id { font-family: ui-monospace, monospace; }
   td .time { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
@@ -161,6 +168,31 @@
   .status-2xx { color: var(--green); }
   .status-4xx { color: var(--amber); }
   .status-5xx, .status-neterr { color: var(--red); }
+
+  /* 成功命令统计卡片 */
+  .stats-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: stretch; }
+  .stat-box {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 16px; min-width: 132px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .stat-box .stat-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .stat-box .stat-main { display: flex; align-items: baseline; gap: 6px; }
+  .stat-box .stat-success { font-size: 26px; font-weight: 600; color: var(--green); font-family: ui-monospace, monospace; }
+  .stat-box .stat-total { color: var(--muted); font-size: 13px; font-family: ui-monospace, monospace; }
+  .stat-box .stat-rate { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+  .stat-box .stat-from { color: var(--muted); font-size: 10px; }
+  .stat-box-wrap { position: relative; }
+  .stat-box-wrap .stat-x {
+    position: absolute; top: -6px; right: -6px; width: 18px; height: 18px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 50%;
+    color: var(--muted); font-size: 12px; line-height: 16px; text-align: center;
+    cursor: pointer; display: none;
+  }
+  .stat-box-wrap:hover .stat-x { display: block; }
+  .stat-box-wrap .stat-x:hover { color: var(--red); border-color: var(--red); }
+  .stats-config { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .stats-config .add-window { width: 90px; }
+  .stats-config .hint { color: var(--muted); font-size: 12px; }
 
   /* 展开子记录：attempts 列表 */
   .sub-row { background: rgba(127,127,127,0.06); }
@@ -352,6 +384,15 @@
   <!-- 重试记录页 -->
   <section id="page-traces" style="display:none">
     <div class="card">
+      <h2>成功命令统计 <span style="text-transform:none;letter-spacing:0;color:var(--muted);font-weight:400;font-size:12px">· 按时间窗口统计最终交付成功（2xx）的命令数</span></h2>
+      <div class="stats-row" id="stats-row"></div>
+      <div class="stats-config">
+        <input class="add-window" id="add-stats-window" type="number" min="0.1" step="0.1" placeholder="+ 添加窗口" title="输入小时数（支持小数，如 0.5=半小时），回车添加一个统计窗口" />
+        <span class="hint">单位：小时。回车添加。默认 1 / 5 / 24（最近1小时、最近5小时、最近1天）</span>
+        <button class="secondary" style="padding:4px 12px;font-size:12px" onclick="resetStatsWindows()" title="恢复默认三个窗口">恢复默认</button>
+      </div>
+    </div>
+    <div class="card">
       <div class="toolbar" style="flex-wrap:wrap;gap:8px 12px;align-items:center">
         <div class="filter-group" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <input type="radio" name="traceMode" id="mode-all" value="all" checked onchange="onModeChange()">
@@ -370,6 +411,16 @@
         <button class="secondary" onclick="refreshTraces()">刷新</button>
       </div>
       <table>
+        <colgroup>
+          <col style="width:14%" />
+          <col style="width:5%" />
+          <col style="width:8%" />
+          <col style="width:42%" />
+          <col style="width:6%" />
+          <col style="width:5%" />
+          <col style="width:7%" />
+          <col style="width:13%" />
+        </colgroup>
         <thead>
           <tr>
             <th>发出时间</th>
@@ -419,6 +470,10 @@
 let d_trace = null;
 let refreshTimer = null;
 let lastSince = null;
+// 成功命令统计窗口（小时数）。默认 1h/5h/1d，用户可自定义。
+let statsWindows = [1, 5, 24];
+// 请求令牌：防止乱序响应覆盖较新数据（自动刷新 2s + 用户增删窗口并发时）
+let statsReqToken = 0;
 
 function showTab(name) {
   document.getElementById('page-config').style.display = name === 'config' ? '' : 'none';
@@ -426,7 +481,7 @@ function showTab(name) {
   document.getElementById('tab-config').classList.toggle('active', name === 'config');
   document.getElementById('tab-traces').classList.toggle('active', name === 'traces');
   if (name === 'config') loadConfig();
-  if (name === 'traces') refreshTraces();
+  if (name === 'traces') { refreshTraces(); refreshStats(); }
 }
 
 function toast(msg, ok = true) {
@@ -622,6 +677,16 @@ document.addEventListener('DOMContentLoaded', () => {
       e.target.value = '';
     }
   });
+  // 成功命令统计：添加自定义时间窗口
+  document.getElementById('add-stats-window').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const v = Number(e.target.value);
+      if (e.target.value.trim() && Number.isFinite(v) && v > 0) {
+        addStatsWindow(v);
+        e.target.value = '';
+      }
+    }
+  });
   // 初始加载
   showTab('config');
 });
@@ -774,6 +839,81 @@ function renderAttempts(atts) {
   return `<div class="att-list">${lines.join('')}</div>`;
 }
 
+// ── 成功命令统计 ─────────────────────────────────────────
+async function refreshStats() {
+  const ws = statsWindows.length ? statsWindows : [1, 5, 24];
+  const url = '/api/stats?windows=' + encodeURIComponent(ws.join(','));
+  const token = ++statsReqToken;
+  try {
+    const r = await (await fetch(url)).json();
+    if (token !== statsReqToken) return; // 已有更新的请求发出，丢弃本次过期响应
+    renderStats(r);
+  } catch (e) {
+    if (token !== statsReqToken) return;
+    renderStats({ error: e.message });
+  }
+}
+
+function renderStats(r) {
+  const row = document.getElementById('stats-row');
+  if (!row) return;
+  if (!r || r.error) {
+    row.innerHTML = `<div class="hint" style="color:var(--red)">统计加载失败: ${r ? escapeHtml(r.error) : '?'}</div>`;
+    return;
+  }
+  const boxes = r.windows.map((w) => {
+    const rate = w.total > 0 ? Math.round((w.success / w.total) * 1000) / 10 : null;
+    const rateText = rate == null ? '—' : rate + '%';
+    const from = fmtTime(new Date(w.fromTs).toISOString());
+    const label = windowLabel(w.hours);
+    const canRemove = statsWindows.length > 1;
+    const x = canRemove ? `<span class="stat-x" onclick="event.stopPropagation();removeStatsWindow(${w.hours})" title="移除该窗口">×</span>` : '';
+    return `<div class="stat-box-wrap">
+      ${x}
+      <div class="stat-box">
+        <div class="stat-label">${label}</div>
+        <div class="stat-main"><span class="stat-success">${w.success}</span><span class="stat-total">/ ${w.total}</span></div>
+        <div class="stat-rate">成功率 ${rateText}</div>
+        <div class="stat-from">自 ${from}</div>
+      </div>
+    </div>`;
+  });
+  row.innerHTML = boxes.join('') || '<div class="hint">无统计窗口</div>';
+}
+
+// 把小时数转成友好标签：1→"最近1小时"，24→"最近1天"，0.5→"最近30分钟"，1.5→"最近1.5小时"
+function windowLabel(h) {
+  if (h < 1) {
+    const m = Math.round(h * 60);
+    return '最近' + m + '分钟';
+  }
+  if (h >= 24 && h % 24 === 0) {
+    const d = h / 24;
+    return '最近' + d + '天';
+  }
+  return '最近' + h + '小时';
+}
+
+function addStatsWindow(h) {
+  if (!Number.isFinite(h) || h <= 0) return;
+  // 去重（容差 0.001）
+  if (statsWindows.some((x) => Math.abs(x - h) < 0.001)) return;
+  statsWindows.push(h);
+  statsWindows.sort((a, b) => a - b);
+  refreshStats();
+}
+
+function removeStatsWindow(h) {
+  statsWindows = statsWindows.filter((x) => Math.abs(x - h) >= 0.001);
+  if (statsWindows.length === 0) statsWindows = [1, 5, 24];
+  refreshStats();
+}
+
+function resetStatsWindows() {
+  statsWindows = [1, 5, 24];
+  refreshStats();
+}
+
 function toggleExpand(id) {
   if (expandedIds.has(id)) expandedIds.delete(id);
   else expandedIds.add(id);
@@ -808,7 +948,9 @@ let lastListCache = [];
 
 function toggleAutoRefresh() {
   if (document.getElementById('autoRefresh').checked) {
-    refreshTimer = setInterval(refreshTraces, 2000);
+    refreshTraces();
+    refreshStats();
+    refreshTimer = setInterval(() => { refreshTraces(); refreshStats(); }, 2000);
   } else {
     clearInterval(refreshTimer);
     refreshTimer = null;
