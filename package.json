@@ -2,8 +2,12 @@
   "name": "cc-switch",
   "displayName": "Claude Code Switch + LLM Proxy",
   "description": "管理 Claude Code 配置并切换；每条配置可选直连或通过本地代理（代理只重试 Claude Code 处理不了的 503+10310，其余透传交给 Claude Code）。",
-  "version": "0.7.0",
+  "version": "1.0.0",
   "publisher": "zaczh",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yananzhi/cc-switch-proxy.git"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },

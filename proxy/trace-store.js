@@ -170,6 +170,9 @@ export function cleanupOld() {
 // body 只序列化一次（JSON.stringify(trace) 的结果字符串），idx 的摘要从同一对象抽，不重复 stringify 大字段。
 export function append(trace) {
   const day = dateStr(new Date());
+  // 规范化 model：保证落盘为字符串（缺字段/undefined/null → ''），让 list 摘要与 getById 完整 trace 一致
+  if (!trace || typeof trace !== 'object') trace = {};
+  if (typeof trace.model !== 'string') trace.model = '';
   let seq = currentSeq(day);
   try {
     const bodyFile = shardPath(day, seq, 'body');
@@ -212,6 +215,7 @@ function summarize(trace, { bodyOffset, bodyLen, seq }) {
     totalMs: r.totalMs,
     finalStatus: r.finalStatus,
     outcome: r.outcome,
+    model: r.model || '',
     // attempt 摘要：不含上游请求/响应 body（那是 74% 的大头）
     attempts: attempts.map((a) => ({
       attempt: a.attempt,

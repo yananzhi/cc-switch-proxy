@@ -19,6 +19,23 @@ import { rmSync, mkdirSync, readdirSync, existsSync, writeFileSync, statSync } f
 import { join } from 'node:path';
 import * as ts from '../trace-store.js';
 
+// 与 trace-store.dateStr 一致地算出"今天"的中国日期（UTC+8），用于文件名和 startedAt，
+// 避免测试写死某日（如 2026-07-08）后，跨天/跨周运行时文件名按运行日期落盘、
+// 或 cleanupOld 把 7+ 天前的固定日期文件删掉而误判。
+function todayStr() {
+  const t = Date.now() + 8 * 3600 * 1000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+const TODAY = todayStr();
+// N 天前（中国时间）的日期串，用于 cleanupOld 测试造 8 天前的过期文件
+function daysAgoStr(n) {
+  const t = Date.now() + 8 * 3600 * 1000 - n * 24 * 3600 * 1000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+const DAY_OLD = daysAgoStr(8);
+// 今天 01:00 UTC（中国时间 09:00）作为 startedAt 锚点，与文件名同日
+const TODAY_STARTED_AT = `${TODAY}T01:00:00.000Z`;
+
 // 每个测试用独立临时目录，避免互相污染。setLogDir 是模块级单例，串行跑没问题。
 function newTmpDir(label) {
   const d = join(process.cwd(), '.test-tmp', `trace-store-${label}-${process.pid}`);
@@ -32,7 +49,8 @@ function makeTrace(opts) {
   const {
     id, outcome = 'success-direct', finalStatus = 200,
     attStatuses = [200], reqBody = 'req-' + id, respBody = 'resp-' + id,
-    startedAt = '2026-07-08T01:00:00.000Z', totalMs = 1000,
+    startedAt = TODAY_STARTED_AT, totalMs = 1000,
+    model = 'claude-sonnet-4-6',
   } = opts;
   // verdict 由 status 推：200→success；503+在重试码里→retryable；其他→not-retryable
   const attempts = attStatuses.map((status, i) => {
@@ -55,7 +73,7 @@ function makeTrace(opts) {
   return {
     id, sourceIp: '127.0.0.1', method: 'POST', path: '/v1/messages',
     startedAt, endedAt: startedAt, totalMs,
-    finalStatus, outcome,
+    finalStatus, outcome, model,
     requestBody: reqBody, responseBody: respBody,
     attempts,
     configSnapshot: { maxAttempts: 20 },
@@ -74,8 +92,8 @@ test('A. append 写出 idx + body 配对，idx 不含胖字段', async () => {
   assert.ok(files.some(f => f.endsWith('.001.idx.jsonl')), '应有 idx 文件');
   assert.ok(files.some(f => f.endsWith('.001.body.jsonl')), '应有 body 文件');
 
-  const idxSize = statSync(join(dir, 'traces-2026-07-08.001.idx.jsonl')).size;
-  const bodySize = statSync(join(dir, 'traces-2026-07-08.001.body.jsonl')).size;
+  const idxSize = statSync(join(dir, `traces-${TODAY}.001.idx.jsonl`)).size;
+  const bodySize = statSync(join(dir, `traces-${TODAY}.001.body.jsonl`)).size;
   assert.ok(idxSize < bodySize / 100, `idx 应远小于 body（idx=${idxSize}, body=${bodySize}）`);
 
   // idx 行不含完整 body 串、不含 attempt 的 upstreamResponseBody
@@ -86,6 +104,24 @@ test('A. append 写出 idx + body 配对，idx 不含胖字段', async () => {
   assert.ok(!rowStr.includes('X'.repeat(201)), 'idx 行不应含大 body 串');
   assert.ok(!('upstreamResponseBody' in row.attempts[0]), 'idx 摘要不应含 upstreamResponseBody');
   assert.ok(row.bodyOffset != null && row.bodyLen != null && row.seq, '应带定位指针');
+  assert.equal(row.model, 'claude-sonnet-4-6', 'idx 摘要应透传 model');
+});
+
+// model 字段边界：缺省/空 model 不应抛、不应出现在摘要里成 undefined
+test('A2. model 缺失与空串落盘', async () => {
+  const dir = newTmpDir('model-edge');
+  ts.setLogDir(dir);
+  ts.append(makeTrace({ id: 'M1', model: '' }));            // 显式空串
+  ts.append({ ...makeTrace({ id: 'M2' }), model: undefined }); // 缺字段（旧 trace 兼容）
+
+  const list = await ts.list({ mode: 'all', limit: 10 });
+  const m1 = list.find(r => r.id === 'M1');
+  const m2 = list.find(r => r.id === 'M2');
+  assert.equal(m1.model, '', '显式空串 → 空串');
+  assert.equal(m2.model, '', '缺 model 字段 → 空串（不出现 undefined）');
+  // 详情也应是空串
+  const full2 = await ts.getById('M2');
+  assert.equal(full2.model, '', 'getById 缺 model 字段 → 空串');
 });
 
 test('C. getById 用 offset 精确读回完整 trace', async () => {
@@ -117,14 +153,14 @@ test('D1. 旧裸文件首次 list 补建 idx，二次 list 走 idx', async () =>
   ts.setLogDir(dir);
   // 写一条旧裸文件（完整 trace，无 idx 配对）
   const legacy = makeTrace({ id: 'L1', attStatuses: [503, 200], outcome: 'success-after-retry', reqBody: 'legacy-req-L1' });
-  writeLegacyShard(dir, '2026-07-08', 1, [legacy]);
+  writeLegacyShard(dir, TODAY, 1, [legacy]);
 
   // 首次：应边读边补建 idx
   const list1 = await ts.list({ mode: 'all', limit: 10 });
   assert.equal(list1.length, 1);
   assert.equal(list1[0].id, 'L1');
   assert.equal(list1[0]._legacyFile, true, '旧数据应标 _legacyFile');
-  assert.ok(existsSync(join(dir, 'traces-2026-07-08.001.idx.jsonl')), '补建后应有 idx 文件');
+  assert.ok(existsSync(join(dir, `traces-${TODAY}.001.idx.jsonl`)), '补建后应有 idx 文件');
 
   // 二次：idx 已在，仍能读到（走快路，不报错）
   const list2 = await ts.list({ mode: 'all', limit: 10 });
@@ -137,7 +173,7 @@ test('D2. getById 从旧裸文件按 offset 精确读', async () => {
   ts.setLogDir(dir);
   const t1 = makeTrace({ id: 'L2', attStatuses: [200], reqBody: 'req-L2' });
   const t2 = makeTrace({ id: 'L3', attStatuses: [503, 200], outcome: 'success-after-retry', reqBody: 'req-L3' });
-  writeLegacyShard(dir, '2026-07-08', 1, [t1, t2]);
+  writeLegacyShard(dir, TODAY, 1, [t1, t2]);
 
   await ts.list({ mode: 'all', limit: 10 }); // 触发补建 idx
   const full = await ts.getById('L3');
@@ -168,7 +204,7 @@ test('E. 四档过滤命中数', async () => {
     makeTrace({ id: 'F7', outcome: 'pass-through', finalStatus: 301, attStatuses: [301] }),
   ];
   // 时间错开，保证 sort 稳定可测
-  traces.forEach((t, i) => { t.startedAt = `2026-07-08T0${i}:00:00.000Z`; });
+  traces.forEach((t, i) => { t.startedAt = `${TODAY}T0${i}:00:00.000Z`; });
   for (const t of traces) ts.append(t);
 
   const all = await ts.list({ mode: 'all', limit: 100 });
@@ -188,13 +224,13 @@ test('E. 四档过滤命中数', async () => {
 test('F. since 增量只返回新于 since 的', async () => {
   const dir = newTmpDir('since');
   ts.setLogDir(dir);
-  ts.append(makeTrace({ id: 'S1', startedAt: '2026-07-08T01:00:00.000Z' }));
-  ts.append(makeTrace({ id: 'S2', startedAt: '2026-07-08T02:00:00.000Z' }));
-  ts.append(makeTrace({ id: 'S3', startedAt: '2026-07-08T03:00:00.000Z' }));
+  ts.append(makeTrace({ id: 'S1', startedAt: `${TODAY}T01:00:00.000Z` }));
+  ts.append(makeTrace({ id: 'S2', startedAt: `${TODAY}T02:00:00.000Z` }));
+  ts.append(makeTrace({ id: 'S3', startedAt: `${TODAY}T03:00:00.000Z` }));
 
-  const since1 = await ts.list({ since: '2026-07-08T01:00:00.000Z', limit: 100 });
+  const since1 = await ts.list({ since: `${TODAY}T01:00:00.000Z`, limit: 100 });
   assert.deepEqual(since1.map(r => r.id), ['S3', 'S2'], 'since=01:00 → S2,S3');
-  const since2 = await ts.list({ since: '2026-07-08T02:30:00.000Z', limit: 100 });
+  const since2 = await ts.list({ since: `${TODAY}T02:30:00.000Z`, limit: 100 });
   assert.deepEqual(since2.map(r => r.id), ['S3'], 'since=02:30 → S3');
 });
 
@@ -207,8 +243,8 @@ test('G. 序号三位补零 + idx/body 同序号配对', async () => {
   ts.setLogDir(dir);
   ts.append(makeTrace({ id: 'R1' }));
   const files = readdirSync(dir);
-  assert.ok(files.includes('traces-2026-07-08.001.idx.jsonl'), '序号三位补零：001.idx');
-  assert.ok(files.includes('traces-2026-07-08.001.body.jsonl'), '序号三位补零：001.body');
+  assert.ok(files.includes(`traces-${TODAY}.001.idx.jsonl`), '序号三位补零：001.idx');
+  assert.ok(files.includes(`traces-${TODAY}.001.body.jsonl`), '序号三位补零：001.body');
   assert.ok(!files.some(f => f.includes('.1.idx') || f.includes('.1.body')), '不应出现非补零序号');
 });
 
@@ -218,16 +254,16 @@ test('H. cleanupOld 删 7 天前的 idx + body + 旧裸文件', async () => {
   const dir = newTmpDir('cleanup');
   ts.setLogDir(dir);
   // 8 天前的旧裸文件 + 8 天前的 idx/body 配对
-  writeLegacyShard(dir, '2026-06-29', 1, [makeTrace({ id: 'OLD1' })]);
-  writeFileSync(join(dir, 'traces-2026-06-29.001.idx.jsonl'), '{}\n', 'utf8');
-  writeFileSync(join(dir, 'traces-2026-06-29.001.body.jsonl'), '{}\n', 'utf8');
+  writeLegacyShard(dir, DAY_OLD, 1, [makeTrace({ id: 'OLD1' })]);
+  writeFileSync(join(dir, `traces-${DAY_OLD}.001.idx.jsonl`), '{}\n', 'utf8');
+  writeFileSync(join(dir, `traces-${DAY_OLD}.001.body.jsonl`), '{}\n', 'utf8');
   // 今天的文件应保留
   ts.append(makeTrace({ id: 'NOW1' }));
 
   ts.cleanupOld();
   const files = readdirSync(dir);
-  assert.ok(!files.some(f => f.startsWith('traces-2026-06-29')), '8 天前的应全删');
-  assert.ok(files.some(f => f.startsWith('traces-2026-07-08')), '今天的应保留');
+  assert.ok(!files.some(f => f.startsWith(`traces-${DAY_OLD}`)), '8 天前的应全删');
+  assert.ok(files.some(f => f.startsWith(`traces-${TODAY}`)), '今天的应保留');
 });
 
 // ── I: 真实日志形态回归 ───────────────────────────────────

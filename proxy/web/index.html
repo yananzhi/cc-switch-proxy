@@ -279,6 +279,22 @@
     </div>
 
     <div class="card">
+      <h2>Effort 档位</h2>
+      <div class="row">
+        <label>强制 effort</label>
+        <select id="cfg-effort" onchange="saveEffort()">
+          <option value="">不改写（原样透传）</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+          <option value="xhigh">xhigh</option>
+          <option value="max">max（Opus 专属，上游可能拒绝）</option>
+        </select>
+        <span class="hint">改写请求体 output_config.effort；切换后下个请求即生效</span>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>重试策略</h2>
       <div class="row">
         <label>最大重试次数</label>
@@ -412,14 +428,16 @@
       </div>
       <table>
         <colgroup>
-          <col style="width:14%" />
+          <col style="width:13%" />
           <col style="width:5%" />
-          <col style="width:8%" />
-          <col style="width:42%" />
+          <col style="width:7%" />
+          <col style="width:30%" />
+          <col style="width:9%" />
           <col style="width:6%" />
           <col style="width:5%" />
           <col style="width:7%" />
           <col style="width:13%" />
+          <col style="width:5%" />
         </colgroup>
         <thead>
           <tr>
@@ -427,14 +445,16 @@
             <th>#ID</th>
             <th>源IP</th>
             <th>方法/路径</th>
+            <th>Model</th>
             <th>错误码</th>
             <th>尝试</th>
             <th>总耗时</th>
+            <th>结束时间</th>
             <th>结果</th>
           </tr>
         </thead>
         <tbody id="trace-tbody">
-          <tr><td colspan="8" class="empty">加载中…</td></tr>
+          <tr><td colspan="10" class="empty">加载中…</td></tr>
         </tbody>
       </table>
     </div>
@@ -496,6 +516,7 @@ async function loadConfig() {
   try {
     const r = await (await fetch('/api/config')).json();
     const p = r.proxy;
+    document.getElementById('cfg-effort').value = r.effortLevel ?? '';
     document.getElementById('cfg-maxAttempts').value = p.maxAttempts;
     document.getElementById('cfg-backoffSec').value = p.backoffSec;
     document.getElementById('cfg-backoffMaxSec').value = p.backoffMaxSec;
@@ -611,6 +632,23 @@ async function togglePassthrough(on) {
     toast('切换失败: ' + e.message, false);
     updateModeBadge(!on); // 回滚
     document.getElementById('cfg-passthrough').checked = !on;
+  }
+}
+
+async function saveEffort() {
+  const level = document.getElementById('cfg-effort').value;
+  try {
+    const r = await fetch('/api/effort', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ level }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'failed');
+    toast(level ? `effort 已设为 ${level}，下个请求生效` : 'effort 已设为不改写（原样透传），下个请求生效');
+  } catch (e) {
+    toast('切换 effort 失败: ' + e.message, false);
+    loadConfig(); // 回滚到已持久化的值
   }
 }
 
@@ -788,7 +826,7 @@ const expandedIds = new Set();
 function renderTraces(list) {
   const tb = document.getElementById('trace-tbody');
   if (!list.length) {
-    tb.innerHTML = '<tr><td colspan="8" class="empty">暂无记录</td></tr>';
+    tb.innerHTML = '<tr><td colspan="10" class="empty">暂无记录</td></tr>';
     return;
   }
   const html = [];
@@ -796,23 +834,27 @@ function renderTraces(list) {
     const atts = Array.isArray(t.attempts) ? t.attempts : [];
     const attCount = atts.length;
     const time = fmtTime(t.startedAt);
+    const endTime = fmtTime(t.endedAt);
     const sc = statusClass(t.lastErrorStatus ?? (t.finalStatus >= 200 && t.finalStatus < 300 ? t.finalStatus : t.finalStatus));
     const scText = t.lastErrorStatus ? t.lastErrorStatus : (t.finalStatus || '-');
     const badge = outcomeBadge(t.outcome);
     const expanded = expandedIds.has(t.id);
     const arrow = attCount > 1 ? (expanded ? '▾' : '▸') : '<span style="display:inline-block;width:1em"></span>';
+    const modelShort = shortenModel(t.model || '');
     html.push(`<tr class="row" data-id="${t.id}">
       <td class="time"><span class="arrow" onclick="event.stopPropagation();toggleExpand('${t.id}')" style="cursor:pointer;display:inline-block;width:1.2em">${arrow}</span>${time}</td>
       <td class="id">${t.id}</td>
       <td>${t.sourceIp}</td>
       <td class="id" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.method} ${t.path}</td>
+      <td class="id" style="padding-left:2px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(t.model || '')}">${modelShort}</td>
       <td class="${sc}">${scText}</td>
       <td>${attCount}</td>
       <td>${fmtMs(t.totalMs)}</td>
+      <td class="time">${endTime}</td>
       <td>${badge}</td>
     </tr>`);
     if (expanded && attCount > 1) {
-      html.push(`<tr class="sub-row" data-id="${t.id}"><td colspan="8" class="sub-cell">${renderAttempts(atts)}</td></tr>`);
+      html.push(`<tr class="sub-row" data-id="${t.id}"><td colspan="10" class="sub-cell">${renderAttempts(atts)}</td></tr>`);
     }
   }
   tb.innerHTML = html.join('');
@@ -965,8 +1007,9 @@ async function openDetail(id) {
     document.getElementById('d-meta').innerHTML = `
       <span class="k">源 IP</span><span class="v">${t.sourceIp}</span>
       <span class="k">方法/路径</span><span class="v">${t.method} ${t.path}</span>
+      <span class="k">Model</span><span class="v">${t.model || '-'}</span>
       <span class="k">发出时间</span><span class="v">${fmtTime(t.startedAt)}</span>
-      <span class="k">返回时间</span><span class="v">${fmtTime(t.endedAt)}</span>
+      <span class="k">结束时间</span><span class="v">${fmtTime(t.endedAt)}</span>
       <span class="k">总耗时</span><span class="v">${fmtMs(t.totalMs)}</span>
       <span class="k">运行模式</span><span class="v">${t.configSnapshot?.passthrough ? '透传（不重试）' : '拦截重试'}</span>
       <span class="k">最终状态</span><span class="v">${t.finalStatus} (${t.outcome})</span>
@@ -1006,6 +1049,14 @@ function fmtMs(ms) {
   if (ms == null) return '-';
   if (ms < 1000) return ms + 'ms';
   return (ms / 1000).toFixed(1) + 's';
+}
+// 缩短 model 名称：claude-sonnet-4-6-20250610 → sonnet-4-6；非 claude 前缀保留原样
+function shortenModel(m) {
+  if (!m) return '-';
+  const stripped = m.replace(/^claude-/, '');
+  // 去掉日期后缀（如 -20250610）
+  const noDate = stripped.replace(/-\d{8}$/, '');
+  return noDate || m;
 }
 function statusClass(s) {
   if (!s || s === 0) return 'status-neterr';

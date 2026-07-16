@@ -4,3 +4,4 @@ node_modules/
 .vscode-test/
 proxy/logs/
 mock/config.*test*.json
+.test-tmp/

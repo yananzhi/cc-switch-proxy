@@ -69,6 +69,35 @@ function lanIpv4s() {
   return out;
 }
 
+// ── effort 改写：把请求体里的 output_config.effort 强制改写为目标值 ──
+// 只改写已有 output_config.effort 的 /v1/messages JSON 请求；不凭空给无 effort 的
+// 请求注入 output_config（避免改变 Claude Code 本没设 effort 的请求行为）。
+// 任何异常都原样返回 body，绝不因改写失败阻断转发。
+function rewriteEffort(body, effortLevel, reqId, contentType) {
+  const ct = String(contentType || '').toLowerCase();
+  if (!ct.includes('json')) return body;
+  let parsed;
+  try {
+    parsed = JSON.parse(body.toString('utf8'));
+  } catch {
+    return body; // 非 JSON body（如 event-stream 响应、空 body），原样转发
+  }
+  if (!parsed || typeof parsed !== 'object') return body;
+  const oc = parsed.output_config;
+  if (typeof oc !== 'object' || oc === null || !('effort' in oc)) return body;
+  const prev = oc.effort;
+  if (prev === effortLevel) return body; // 已经是目标值，免去一次 stringify + body 长度变化
+  oc.effort = effortLevel;
+  let rewritten;
+  try {
+    rewritten = Buffer.from(JSON.stringify(parsed), 'utf8');
+  } catch {
+    return body;
+  }
+  detail(reqId, 'EFFORT REWRITE', `output_config.effort: ${String(prev)} → ${effortLevel} (${body.length} → ${rewritten.length} bytes)`);
+  return rewritten;
+}
+
 // ── 转发一次请求到上游 ──────────────────────────────────────
 function forwardOnce({ method, path, reqHeaders, body, reqId, attempt, timeoutMs, upstream, token }) {
   return new Promise((resolve) => {
@@ -252,6 +281,19 @@ async function handleApi(req, res, urlPath) {
     }
     return;
   }
+  // 热改 effortLevel：下个请求即生效。level ∈ {'', low, medium, high, xhigh, max}；'' = 不改写原样透传。
+  if (req.method === 'POST' && urlPath === '/api/effort') {
+    try {
+      const body = await readJsonBody(req);
+      const level = body.level;
+      const updated = configStore.updateEffort(level);
+      concise(`EFFORT updated → ${updated || '(不改写，原样透传)'}`);
+      sendJson(res, 200, { ok: true, effortLevel: updated });
+    } catch (e) {
+      sendJson(res, 400, { error: e.message });
+    }
+    return;
+  }
   if (req.method === 'GET' && urlPath === '/api/traces') {
     const u = new URL('http://x' + req.url);
     const since = u.searchParams.get('since') || undefined;
@@ -408,11 +450,30 @@ async function handleRequest(req, res) {
   const body = Buffer.concat(chunks);
   const id = rid();
 
+  // 从请求 body 提取 model 字段（Claude API /v1/messages 请求体含 model）
+  let reqModel = '';
+  try {
+    const ct = req.headers['content-type'] || '';
+    if (ct.includes('json') && body.length > 0) {
+      const parsed = JSON.parse(body.toString('utf8'));
+      reqModel = parsed.model || '';
+    }
+  } catch { /* 非 JSON 或解析失败，忽略 */ }
+
+  // effort 改写：仅对 /v1/messages 主路径（不含 count_tokens/batches 等子路径）的 JSON 请求改写。
+  // effortLevel 为空串（用户选"不改写"）时原样透传；无 output_config 或 effort 缺失也不改；改写失败也原样透传。
+  const effortLevel = configStore.getEffortLevel();
+  const isMessagesMain = /^\/v1\/messages(?:\?|$)/.test(req.url);
+  const outBody = (effortLevel && isMessagesMain)
+    ? rewriteEffort(body, effortLevel, id, req.headers['content-type'])
+    : body;
+  const rewritten = outBody !== body;
+
   const params = runtimeParams();
   const { maxAttempts, backoffSec, backoffMaxSec, passthrough, retryOnStatus, retryOnBodyErrorCode, upstreamTimeoutMs, upstream, upstreamBase, token } = params;
   const modeTag = passthrough ? '透传' : '重试';
 
-  concise(`REQ  #${id} ${req.method} ${req.url} (body ${body.length} bytes) from ${ip} [${modeTag}]`);
+  concise(`REQ  #${id} ${req.method} ${req.url} (body ${body.length} bytes) from ${ip} [${modeTag}]${rewritten ? ` [effort→${effortLevel}]` : ''}`);
   detail(id, 'CLIENT → PROXY REQUEST', [
     `${req.method} ${req.url}`,
     `mode: ${modeTag}`,
@@ -431,10 +492,10 @@ async function handleRequest(req, res) {
     attempt = 1;
     const attStart = nowIso();
     const attT0 = Date.now();
-    const r = await forwardOnce({ method: req.method, path: req.url, reqHeaders: req.headers, body, reqId: id, attempt, timeoutMs: upstreamTimeoutMs, upstream, token });
+    const r = await forwardOnce({ method: req.method, path: req.url, reqHeaders: req.headers, body: outBody, reqId: id, attempt, timeoutMs: upstreamTimeoutMs, upstream, token });
     const attMs = Date.now() - attT0;
     concise(`     #${id} attempt 1/1 → ${r.status || 'NETERR'} (${attMs}ms) [透传，不重试]`);
-    attempts.push({ attempt: 1, status: r.status, networkError: r.networkError ?? null, startedAt: attStart, endedAt: nowIso(), elapsedMs: attMs, verdict: 'passthrough', reason: 'passthrough mode (no retry)', backoffMs: null, upstreamRequestBody: body.toString('utf8'), upstreamResponseBody: r.body.toString('utf8') });
+    attempts.push({ attempt: 1, status: r.status, networkError: r.networkError ?? null, startedAt: attStart, endedAt: nowIso(), elapsedMs: attMs, verdict: 'passthrough', reason: 'passthrough mode (no retry)', backoffMs: null, upstreamRequestBody: outBody.toString('utf8'), upstreamResponseBody: r.body.toString('utf8') });
     if (r.status === 0) {
       const errBody = JSON.stringify({ type: 'error', error: { type: 'upstream_unreachable', message: `upstream ${upstreamBase ?? ''} unreachable (passthrough): ${r.networkError}` } });
       res.writeHead(502, { 'content-type': 'application/json' });
@@ -452,7 +513,7 @@ async function handleRequest(req, res) {
       attempt++;
       const attStart = nowIso();
       const attT0 = Date.now();
-      const r = await forwardOnce({ method: req.method, path: req.url, reqHeaders: req.headers, body, reqId: id, attempt, timeoutMs: upstreamTimeoutMs, upstream, token });
+      const r = await forwardOnce({ method: req.method, path: req.url, reqHeaders: req.headers, body: outBody, reqId: id, attempt, timeoutMs: upstreamTimeoutMs, upstream, token });
       const attMs = Date.now() - attT0;
       concise(`     #${id} attempt ${attempt}/${maxAttempts} → ${r.status || 'NETERR'} (${attMs}ms${r.networkError ? ` ${r.networkError}` : ''})`);
 
@@ -491,7 +552,7 @@ async function handleRequest(req, res) {
       if (verdict !== null && verdict.retryable && attempt < maxAttempts) {
         waitMs = backoffForMs(attempt, backoffSec, backoffMaxSec);
       }
-      attempts.push({ attempt, status: r.status, networkError: r.networkError ?? null, startedAt: attStart, endedAt: nowIso(), elapsedMs: attMs, verdict: verdict === null ? 'success' : verdict.retryable ? 'retryable' : 'not-retryable', reason: verdict === null ? '(real success)' : verdict.reason, backoffMs: waitMs, upstreamRequestBody: body.toString('utf8'), upstreamResponseBody: r.body.toString('utf8') });
+      attempts.push({ attempt, status: r.status, networkError: r.networkError ?? null, startedAt: attStart, endedAt: nowIso(), elapsedMs: attMs, verdict: verdict === null ? 'success' : verdict.retryable ? 'retryable' : 'not-retryable', reason: verdict === null ? '(real success)' : verdict.reason, backoffMs: waitMs, upstreamRequestBody: outBody.toString('utf8'), upstreamResponseBody: r.body.toString('utf8') });
 
       if (verdict === null) {
         concise(`     #${id} DONE`);
@@ -534,8 +595,8 @@ async function handleRequest(req, res) {
   concise(`REQ  #${id} delivered to client, total ${totalMs}ms, ${attempt} attempt(s), outcome=${outcome}`);
   traceStore.append({
     id, sourceIp: ip, method: req.method, path: req.url, startedAt, endedAt, totalMs,
-    finalStatus: finalDelivered?.status ?? 0, outcome,
-    requestBody: body.toString('utf8'),
+    finalStatus: finalDelivered?.status ?? 0, outcome, model: reqModel,
+    requestBody: outBody.toString('utf8'),
     responseBody: finalDelivered ? finalDelivered.body.toString('utf8') : '',
     responseHeaders: finalDelivered?.headers ?? {},
     attempts,

@@ -68,6 +68,24 @@ export function getProxy() {
   return { ...proxy };
 }
 
+// effortLevel：强制改写 output_config.effort 的目标值（每次请求读，支持热重载）。
+// 合法取值：low | medium | high | xhigh | max（max 是 Opus 专属档）；空串 '' = 不改写原样透传。
+// 字段缺失（undefined，老配置文件）回退 'max'，保持旧行为；显式空串 = 用户选了"不改写"。
+export function getEffortLevel() {
+  return config.effortLevel === undefined ? 'max' : config.effortLevel;
+}
+
+// 热重载：更新 effortLevel。level ∈ {'', 'low', 'medium', 'high', 'xhigh', 'max'}。
+// '' / null = 不改写。非法值抛错。写回 config.effortLevel + persist（下个请求即生效）。
+export function updateEffort(level) {
+  const ALLOWED = ['', 'low', 'medium', 'high', 'xhigh', 'max'];
+  const v = level === null || level === undefined ? '' : String(level);
+  if (!ALLOWED.includes(v)) throw new Error(`effortLevel 必须是 ${ALLOWED.join('/')} 之一`);
+  config.effortLevel = v;
+  persist();
+  return getEffortLevel();
+}
+
 // 监听配置（启动时用，之后不改）
 export function getListen() {
   return { listenHost: proxy.listenHost, listenPort: proxy.listenPort };
@@ -92,6 +110,7 @@ export function updateListenPort(port) {
 export function getView() {
   const env = getEnv();
   return {
+    effortLevel: config.effortLevel === undefined ? 'max' : config.effortLevel,
     proxy: {
       maxAttempts: proxy.maxAttempts,
       backoffSec: proxy.backoffSec,

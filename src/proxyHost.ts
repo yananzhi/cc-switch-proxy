@@ -353,7 +353,7 @@ const DEFAULT_PROXY_CONFIG = {
         API_TIMEOUT_MS: '600000',
         ANTHROPIC_MODEL: '',
     },
-    effortLevel: 'xhigh',
+    effortLevel: 'max',
     proxy: {
         listenHost: '127.0.0.1',
         listenPort: DEFAULT_PORT,
