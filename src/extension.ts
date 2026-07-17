@@ -8,11 +8,22 @@ import { ProxyHost } from './proxyHost';
 import { ConfigTreeProvider, findActiveConfig, getOverridePath, getConfigFromNode } from './treeProvider';
 import { WebviewEditor } from './webviewEditor';
 import { backupSettings, detectPlatform, readSettings, writeSettings } from './claudeConfig';
+import { extractUpstream, synthesizeProxySettings } from './upstream';
+import { ClaudeLauncher } from './claudeLauncher';
+import { migrateFromLegacy } from './migrate';
+import { LocalConfigStore, LocalActiveStateStore } from './localConfigStore';
 
 // 模块级，供 deactivate 停止代理
 let proxyHost: ProxyHost | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
+    // 扩展改名 cc-switch → claude-code-proxy 后，旧 globalStorage 数据读不到。
+    // 同步迁移：必须在 ConfigStore/ActiveStateStore 首次 load() 之前完成，否则 cache 读到空目录。
+    const migrated = migrateFromLegacy(context.globalStorageUri);
+    if (migrated) {
+        console.log('[claude-code-proxy] 已从旧 cc-switch 命名空间迁移 configs.json + active.json');
+    }
+
     const store = new ConfigStore(context.globalStorageUri);
     const activeState = new ActiveStateStore(context.globalStorageUri);
     const proxyToggle = new ProxyToggleStore();
@@ -20,13 +31,50 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(output);
     proxyHost = new ProxyHost(context, output, proxyToggle);
 
+    // workspace-local 存储随 workspace 切换重建；模块级引用供 launcher/editor 取当前实例
+    let localStore: LocalConfigStore | null = null;
+    let localActiveState: LocalActiveStateStore | null = null;
+
+    function workspaceRoot(): string | null {
+        return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+    }
+
+    function applyWorkspace(): void {
+        const root = workspaceRoot();
+        if (root) {
+            localStore = new LocalConfigStore(root);
+            localActiveState = new LocalActiveStateStore(root);
+        } else {
+            localStore = null;
+            localActiveState = null;
+        }
+        // treeProvider 与 webviewEditor/launcher 共享同一 local store 实例，保证 cache 一致
+        treeProvider.setWorkspaceRoot(localStore, localActiveState);
+    }
+
+    const launcher = new ClaudeLauncher(
+        () => localStore,
+        () => localActiveState,
+        proxyHost,
+        output,
+    );
+
     const treeProvider = new ConfigTreeProvider(store, activeState);
+    applyWorkspace();
 
     const treeView = vscode.window.createTreeView('claude-code-proxy.configs', {
         treeDataProvider: treeProvider,
-        showCollapseAll: false,
+        showCollapseAll: true,
     });
     context.subscriptions.push(treeView);
+
+    // workspace 变化：重建 local store + 刷新树
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeWorkspaceFolders(() => {
+            applyWorkspace();
+            void refresh();
+        }),
+    );
 
     const refresh = async (): Promise<void> => {
         treeProvider.refresh();
@@ -36,6 +84,9 @@ export function activate(context: vscode.ExtensionContext): void {
     const editor = new WebviewEditor(store, {
         onSaved: () => { void refresh(); },
         switchConfig: (cfg) => doSwitch(cfg),
+        switchLocalConfig: (cfg) => doLocalSwitch(cfg),
+        getLocalStore: () => localStore,
+        loadGlobalConfigs: () => store.load(),
     });
 
     // --- Status bar indicator ---
@@ -59,26 +110,6 @@ export function activate(context: vscode.ExtensionContext): void {
         const modeLabel = active?.mode === 'proxy' ? '代理' : '直连';
         statusItem.text = `$(arrow-swap) CC: ${active ? active.name : 'none'}${active ? ` (${modeLabel})` : ''}`;
         statusItem.show();
-    }
-
-    // --- 从配置 content 解出上游 env（代理模式用）---
-    function extractUpstream(content: string): { env: Record<string, string>; obj: Record<string, unknown> } | null {
-        try {
-            const obj = JSON.parse(content) as Record<string, unknown>;
-            const env = (obj.env ?? {}) as Record<string, string>;
-            return { env, obj };
-        } catch {
-            return null;
-        }
-    }
-
-    /** 代理模式：把 content 的 baseUrl 改成指向代理，作为写到 settings.json 的内容 */
-    function synthesizeProxySettings(content: string, port: number): string | null {
-        const parsed = extractUpstream(content);
-        if (!parsed) return null;
-        parsed.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${port}`;
-        parsed.obj.env = parsed.env;
-        return JSON.stringify(parsed.obj, null, 2);
     }
 
     // --- Switch flow: read → backup → overwrite → toast(Reload + Undo) ---
@@ -174,6 +205,30 @@ export function activate(context: vscode.ExtensionContext): void {
         }
     }
 
+    /**
+     * workspace-local 配置切换：纯标记。
+     * 只记 local-active.json（id+mode），不写任何 settings.json、不 reload。
+     * launcher 启动时读此标记 → 取对应 local 配置 → 写 .claude_proxy/settings.json 再起 claude。
+     * proxy 模式也只标记，注入上游推迟到 launcher 启动时。
+     */
+    async function doLocalSwitch(cfg: LLMConfig): Promise<void> {
+        if (!cfg || typeof cfg.content !== 'string') {
+            void vscode.window.showErrorMessage('Invalid local config — missing content.');
+            return;
+        }
+        if (!localActiveState) {
+            void vscode.window.showErrorMessage('请先打开一个 workspace 文件夹');
+            return;
+        }
+        const mode = cfg.mode === 'proxy' ? 'proxy' : 'direct';
+        await localActiveState.write(cfg.id, mode);
+        await refresh();
+        const modeLabel = mode === 'proxy' ? '经代理' : '直连';
+        void vscode.window.showInformationMessage(
+            `Local active → '${cfg.name}' (${modeLabel})。下次启动 workspace Claude 会话时生效。`,
+        );
+    }
+
     /** Resolve the LLMConfig from a command argument.
      *  - Clicking a tree row passes the LLMConfig directly via arguments.
      *  - Inline/context menus pass the TreeItem itself, so we look it up.
@@ -204,19 +259,36 @@ export function activate(context: vscode.ExtensionContext): void {
         return picked?.config;
     }
 
-    // --- Commands ---
+    async function pickLocalConfig(action: string): Promise<LLMConfig | undefined> {
+        if (!localStore) {
+            void vscode.window.showErrorMessage('请先打开一个 workspace 文件夹');
+            return undefined;
+        }
+        const configs = await localStore.load();
+        if (configs.length === 0) {
+            void vscode.window.showInformationMessage('No workspace-local configs yet. Create one first.');
+            return undefined;
+        }
+        const picked = await vscode.window.showQuickPick(
+            configs.map(c => ({ label: c.name, description: c.id, config: c })),
+            { placeHolder: `Select a local config to ${action}` },
+        );
+        return picked?.config;
+    }
+
+    // --- Commands: global configs ---
     context.subscriptions.push(
         vscode.commands.registerCommand('claude-code-proxy.newConfig', () => {
-            void editor.openNew();
+            void editor.openNewGlobal();
         }),
 
         vscode.commands.registerCommand('claude-code-proxy.editConfig', (arg?: LLMConfig | vscode.TreeItem) => {
             const cfg = resolveConfig(arg);
             if (!cfg) {
-                void pickConfig('edit').then(c => { if (c) { void editor.openEdit(c); } });
+                void pickConfig('edit').then(c => { if (c) { void editor.openEditGlobal(c); } });
                 return;
             }
-            void editor.openEdit(cfg);
+            void editor.openEditGlobal(cfg);
         }),
 
         vscode.commands.registerCommand('claude-code-proxy.switchConfig', (arg?: LLMConfig | vscode.TreeItem) => {
@@ -234,6 +306,43 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
             await store.remove(target.id);
+            await refresh();
+        }),
+
+        // --- Commands: workspace-local configs ---
+        vscode.commands.registerCommand('claude-code-proxy.newLocalConfig', () => {
+            void editor.openNewLocal();
+        }),
+
+        vscode.commands.registerCommand('claude-code-proxy.editLocalConfig', (arg?: LLMConfig | vscode.TreeItem) => {
+            const cfg = resolveConfig(arg);
+            if (!cfg) {
+                void pickLocalConfig('edit').then(c => { if (c) { void editor.openEditLocal(c); } });
+                return;
+            }
+            void editor.openEditLocal(cfg);
+        }),
+
+        vscode.commands.registerCommand('claude-code-proxy.switchLocalConfig', (arg?: LLMConfig | vscode.TreeItem) => {
+            const cfg = resolveConfig(arg);
+            if (!cfg) {
+                void pickLocalConfig('switch to').then(c => { if (c) { void doLocalSwitch(c); } });
+                return;
+            }
+            void doLocalSwitch(cfg);
+        }),
+
+        vscode.commands.registerCommand('claude-code-proxy.deleteLocalConfig', async (arg?: LLMConfig | vscode.TreeItem) => {
+            const cfg = resolveConfig(arg) ?? await pickLocalConfig('delete');
+            if (!cfg || !localStore) {
+                return;
+            }
+            await localStore.remove(cfg.id);
+            // 删的若正是 active，清掉标记
+            const state = await localActiveState?.load();
+            if (state && state.id === cfg.id) {
+                await localActiveState?.clear();
+            }
             await refresh();
         }),
 
@@ -372,6 +481,14 @@ export function activate(context: vscode.ExtensionContext): void {
             } else {
                 void vscode.window.showWarningMessage(result.message);
             }
+        }),
+    );
+
+    // 启动 workspace 独立 Claude CLI 会话：CLAUDE_CONFIG_DIR 指向 {workspace}/.claude_proxy/，
+    // 继承当前激活配置（proxy 模式走本地代理）。工具栏按钮 + 快捷键 + 命令面板三入口。
+    context.subscriptions.push(
+        vscode.commands.registerCommand('claude-code-proxy.launchWorkspaceClaude', () => {
+            void launcher.launch();
         }),
     );
 
