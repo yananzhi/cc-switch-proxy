@@ -26,7 +26,7 @@ export class ActiveStateStore {
             this.cache = (parsed && parsed.id && parsed.mode) ? parsed : null;
         } catch (err: unknown) {
             if (!isENOENT(err)) {
-                console.error('[cc-switch] Failed to read active.json:', err);
+                console.error('[claude-code-proxy] Failed to read active.json:', err);
             }
             this.cache = null;
         }
@@ -45,7 +45,7 @@ export class ActiveStateStore {
             await fs.promises.unlink(this.filePath);
         } catch (err: unknown) {
             if (!isENOENT(err)) {
-                console.error('[cc-switch] Failed to clear active.json:', err);
+                console.error('[claude-code-proxy] Failed to clear active.json:', err);
             }
         }
     }

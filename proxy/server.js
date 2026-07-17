@@ -103,7 +103,7 @@ function forwardOnce({ method, path, reqHeaders, body, reqId, attempt, timeoutMs
   return new Promise((resolve) => {
     // 上游未注入（代理常驻但还没激活"通过代理"配置）→ 直接返回 502，不崩
     if (!upstream || !upstream.protocol) {
-      detail(reqId, `attempt ${attempt} → NO UPSTREAM`, '代理尚未注入上游配置（请在 cc-switch 激活一条"通过代理"配置）');
+      detail(reqId, `attempt ${attempt} → NO UPSTREAM`, '代理尚未注入上游配置（请在 claude-code-proxy 激活一条"通过代理"配置）');
       resolve({ status: 0, headers: {}, body: Buffer.alloc(0), networkError: 'no upstream configured' });
       return;
     }

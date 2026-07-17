@@ -46,7 +46,7 @@ const TEST_CONFIG_BODY = JSON.stringify({
   },
 }, null, 2);
 
-const TMP_LOGS = join(tmpdir(), `cc-switch-logs-test-${process.pid}`);
+const TMP_LOGS = join(tmpdir(), `claude-code-proxy-logs-test-${process.pid}`);
 
 let mockProc, proxyProc;
 let passed = 0, failed = 0;

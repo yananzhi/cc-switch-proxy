@@ -5,7 +5,7 @@ node_modules/**
 .gitignore
 tsconfig.json
 **/*.map
-cc-switch-configs.json
+claude-code-proxy-configs.json
 mock/**
 *.vsix
 proxy/logs/**

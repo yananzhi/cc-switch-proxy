@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>Claude Code Switch 代理网络拓扑</title>
+<title>Claude Code Proxy 代理网络拓扑</title>
 <style>
   :root{
     --vscode:#1e1e1e; --bg:#0d1117; --panel:#161b22; --border:#30363d;
@@ -61,7 +61,7 @@
 </head>
 <body>
 
-<h1>Claude Code Switch + LLM 代理 — 网络拓扑</h1>
+<h1>Claude Code Proxy — 代理网络拓扑</h1>
 <p class="sub">本插件的本质：通过改写 <code>~/.claude/settings.json</code> 里的 <code>env.ANTHROPIC_BASE_URL</code>，决定 Claude Code「连到哪」——直连真实上游，还是先走本地代理再转给真实上游。</p>
 
 <div class="legend">
@@ -93,7 +93,7 @@
     <!-- Claude Code 插件 -->
     <rect class="box box-plugin" x="40" y="100" width="140" height="150" rx="8"/>
     <text class="title" x="110" y="122" text-anchor="middle">Claude Code 插件</text>
-    <text class="subt"  x="110" y="138" text-anchor="middle">cc-switch 扩展</text>
+    <text class="subt"  x="110" y="138" text-anchor="middle">claude-code-proxy 扩展</text>
     <text class="lbl"   x="110" y="160" text-anchor="middle">激活配置时：</text>
     <text class="lbl-mute" x="110" y="178" text-anchor="middle">① ensureRunning()</text>
     <text class="lbl-mute" x="110" y="194" text-anchor="middle">② setUpstream(真实上游)</text>
@@ -180,14 +180,14 @@
 <table>
 <tr><th>组件</th><th>角色</th><th>关键事实</th></tr>
 <tr><td>VS Code</td><td>宿主进程</td><td>扩展和代理都跑在它的扩展宿主进程内；<code>extensionKind: workspace</code>，WSL 里代理与 Claude Code 同 localhost</td></tr>
-<tr><td>Claude Code 插件 (cc-switch)</td><td>编排者 / 控制面</td><td>不碰数据流本身；只做三件事：拉起代理、注入真实上游、改写 <code>settings.json</code> 的 <code>ANTHROPIC_BASE_URL</code></td></tr>
+<tr><td>Claude Code 插件 (claude-code-proxy)</td><td>编排者 / 控制面</td><td>不碰数据流本身；只做三件事：拉起代理、注入真实上游、改写 <code>settings.json</code> 的 <code>ANTHROPIC_BASE_URL</code></td></tr>
 <tr><td>代理 (proxy/server.js)</td><td>数据面 + 重试</td><td>监听 127.0.0.1:11434；收到请求转发给真实上游；对 503/10310 等做指数退避重试；其余透传</td></tr>
 <tr><td>LLM API 服务</td><td>真实上游</td><td>真实 baseUrl + token 由插件从配置 <code>content.env</code> 解出后注入代理；Claude Code 看不到真实地址（只看到 127.0.0.1）</td></tr>
 </table>
 
 <!-- ===================================================== 图2：直连模式 -->
 <h2><span class="num">2</span>直连模式：「直连」配置激活后</h2>
-<p class="cap">默认模式。一条 <b>mode=direct</b> 的配置被激活时，扩展只是把配置 content 原样写进 <code>settings.json</code>，代理完全不参与——和原 cc-switch 行为一致。</p>
+<p class="cap">默认模式。一条 <b>mode=direct</b> 的配置被激活时，扩展只是把配置 content 原样写进 <code>settings.json</code>，代理完全不参与——和原 claude-code-proxy 行为一致。</p>
 
 <figure>
 <svg viewBox="0 0 920 340" xmlns="http://www.w3.org/2000/svg">
@@ -248,7 +248,7 @@
 </figure>
 
 <div class="note">
-<b>为什么默认是直连？</b> 直连不引入任何额外跳数、不动网络路径，等于「不用代理」——只有切到 <code>mode=proxy</code> 的配置时代理才参与。这保证了「我只想切配置、不想要代理」的场景跟原 cc-switch 完全一致，零风险。
+<b>为什么默认是直连？</b> 直连不引入任何额外跳数、不动网络路径，等于「不用代理」——只有切到 <code>mode=proxy</code> 的配置时代理才参与。这保证了「我只想切配置、不想要代理」的场景跟原 claude-code-proxy 完全一致，零风险。
 </div>
 
 <!-- ===================================================== 图3：Claude Code 根据什么连 -->

@@ -62,7 +62,7 @@ export class ConfigTreeProvider implements vscode.TreeDataProvider<ConfigNode> {
         const item = new vscode.TreeItem(`Detected: ${platform.label}`);
         item.description = platform.configPath;
         item.tooltip = new vscode.MarkdownString(
-            `**Claude Code Switch Setting — target**\n\nDetected environment: \`${platform.label}\`\n\nClaude Code config path:\n\`${platform.configPath}\``
+            `**Claude Code Proxy — target**\n\nDetected environment: \`${platform.label}\`\n\nClaude Code config path:\n\`${platform.configPath}\``
         );
         item.iconPath = new vscode.ThemeIcon('vm-connect');
         item.contextValue = 'info';
@@ -93,7 +93,7 @@ export class ConfigTreeProvider implements vscode.TreeDataProvider<ConfigNode> {
         itemToConfig.set(item, cfg);
         // Single-click on the row switches to it (the core, frequent action).
         item.command = {
-            command: 'cc-switch.switchConfig',
+            command: 'claude-code-proxy.switchConfig',
             title: 'Switch to This Config',
             arguments: [cfg],
         };
@@ -138,5 +138,5 @@ function normalizeJson(raw: string): string | null {
 }
 
 export function getOverridePath(): string {
-    return vscode.workspace.getConfiguration('cc-switch').get<string>('configFilePath') || '';
+    return vscode.workspace.getConfiguration('claude-code-proxy').get<string>('configFilePath') || '';
 }

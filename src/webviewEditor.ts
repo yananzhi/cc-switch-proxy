@@ -47,7 +47,7 @@ export class WebviewEditor {
         }
 
         const panel = vscode.window.createWebviewPanel(
-            'cc-switch.editor',
+            'claude-code-proxy.editor',
             title,
             vscode.ViewColumn.Active,
             {

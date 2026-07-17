@@ -1,12 +1,12 @@
 {
-  "name": "cc-switch",
-  "displayName": "Claude Code Switch + LLM Proxy",
+  "name": "claude-code-proxy",
+  "displayName": "Claude Code Proxy",
   "description": "管理 Claude Code 配置并切换；每条配置可选直连或通过本地代理（代理只重试 Claude Code 处理不了的 503+10310，其余透传交给 Claude Code）。",
   "version": "1.0.2",
   "publisher": "zaczh",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yananzhi/cc-switch-proxy.git"
+    "url": "https://github.com/yananzhi/claude-code-proxy.git"
   },
   "engines": {
     "vscode": "^1.80.0"
@@ -22,16 +22,16 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "cc-switch",
-          "title": "Claude Code Switch Setting",
+          "id": "claude-code-proxy",
+          "title": "Claude Code Proxy",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "cc-switch": [
+      "claude-code-proxy": [
         {
-          "id": "cc-switch.configs",
+          "id": "claude-code-proxy.configs",
           "name": "LLM Configs"
         }
       ]
@@ -39,124 +39,124 @@
     "menus": {
       "view/title": [
         {
-          "command": "cc-switch.newConfig",
-          "when": "view == cc-switch.configs",
+          "command": "claude-code-proxy.newConfig",
+          "when": "view == claude-code-proxy.configs",
           "group": "navigation"
         },
         {
-          "command": "cc-switch.refresh",
-          "when": "view == cc-switch.configs",
+          "command": "claude-code-proxy.refresh",
+          "when": "view == claude-code-proxy.configs",
           "group": "navigation"
         },
         {
-          "command": "cc-switch.toggleProxyBackupOn",
-          "when": "view == cc-switch.configs && !cc-switch.proxyToggleEnabled",
+          "command": "claude-code-proxy.toggleProxyBackupOn",
+          "when": "view == claude-code-proxy.configs && !claude-code-proxy.proxyToggleEnabled",
           "group": "navigation"
         },
         {
-          "command": "cc-switch.toggleProxyBackupOff",
-          "when": "view == cc-switch.configs && cc-switch.proxyToggleEnabled",
+          "command": "claude-code-proxy.toggleProxyBackupOff",
+          "when": "view == claude-code-proxy.configs && claude-code-proxy.proxyToggleEnabled",
           "group": "navigation"
         },
         {
-          "command": "cc-switch.exportConfigs",
-          "when": "view == cc-switch.configs"
+          "command": "claude-code-proxy.exportConfigs",
+          "when": "view == claude-code-proxy.configs"
         },
         {
-          "command": "cc-switch.importConfigs",
-          "when": "view == cc-switch.configs"
+          "command": "claude-code-proxy.importConfigs",
+          "when": "view == claude-code-proxy.configs"
         }
       ],
       "view/item/context": [
         {
-          "command": "cc-switch.switchConfig",
-          "when": "view == cc-switch.configs && viewItem == config",
+          "command": "claude-code-proxy.switchConfig",
+          "when": "view == claude-code-proxy.configs && viewItem == config",
           "group": "inline@1"
         },
         {
-          "command": "cc-switch.editConfig",
-          "when": "view == cc-switch.configs && viewItem == config",
+          "command": "claude-code-proxy.editConfig",
+          "when": "view == claude-code-proxy.configs && viewItem == config",
           "group": "inline@2"
         },
         {
-          "command": "cc-switch.deleteConfig",
-          "when": "view == cc-switch.configs && viewItem == config",
+          "command": "claude-code-proxy.deleteConfig",
+          "when": "view == claude-code-proxy.configs && viewItem == config",
           "group": "inline@3"
         }
       ]
     },
     "commands": [
       {
-        "command": "cc-switch.newConfig",
+        "command": "claude-code-proxy.newConfig",
         "title": "New LLM Config",
         "icon": "$(add)"
       },
       {
-        "command": "cc-switch.editConfig",
+        "command": "claude-code-proxy.editConfig",
         "title": "Edit",
         "icon": "$(edit)"
       },
       {
-        "command": "cc-switch.switchConfig",
+        "command": "claude-code-proxy.switchConfig",
         "title": "Switch to This Config",
         "icon": "$(arrow-swap)"
       },
       {
-        "command": "cc-switch.deleteConfig",
+        "command": "claude-code-proxy.deleteConfig",
         "title": "Delete",
         "icon": "$(trash)"
       },
       {
-        "command": "cc-switch.refresh",
+        "command": "claude-code-proxy.refresh",
         "title": "Refresh",
         "icon": "$(refresh)"
       },
       {
-        "command": "cc-switch.openView",
-        "title": "Open Claude Code Switch Setting"
+        "command": "claude-code-proxy.openView",
+        "title": "Open Claude Code Proxy"
       },
       {
-        "command": "cc-switch.openProxyUI",
+        "command": "claude-code-proxy.openProxyUI",
         "title": "LLM 代理: 打开控制台（重试参数 + Trace）",
-        "category": "CC Switch"
+        "category": "Claude Code Proxy"
       },
       {
-        "command": "cc-switch.killProxy",
+        "command": "claude-code-proxy.killProxy",
         "title": "LLM 代理: 重启代理（关闭监听，宿主心跳自动重起）",
-        "category": "CC Switch"
+        "category": "Claude Code Proxy"
       },
       {
-        "command": "cc-switch.toggleProxyBackup",
+        "command": "claude-code-proxy.toggleProxyBackup",
         "title": "LLM 代理: 切换本窗口 backup proxy 开关",
-        "category": "CC Switch"
+        "category": "Claude Code Proxy"
       },
       {
-        "command": "cc-switch.toggleProxyBackupOn",
+        "command": "claude-code-proxy.toggleProxyBackupOn",
         "title": "LLM 代理: 开启本窗口 backup proxy",
         "icon": "$(debug-start)",
-        "enablement": "!cc-switch.proxyToggleEnabled"
+        "enablement": "!claude-code-proxy.proxyToggleEnabled"
       },
       {
-        "command": "cc-switch.toggleProxyBackupOff",
+        "command": "claude-code-proxy.toggleProxyBackupOff",
         "title": "LLM 代理: 关闭本窗口 backup proxy",
         "icon": "$(debug-stop)",
-        "enablement": "cc-switch.proxyToggleEnabled"
+        "enablement": "claude-code-proxy.proxyToggleEnabled"
       },
       {
-        "command": "cc-switch.exportConfigs",
+        "command": "claude-code-proxy.exportConfigs",
         "title": "Export Configs",
         "icon": "$(export)"
       },
       {
-        "command": "cc-switch.importConfigs",
+        "command": "claude-code-proxy.importConfigs",
         "title": "Import Configs",
         "icon": "$(cloud-download)"
       }
     ],
     "configuration": {
-      "title": "Claude Code Switch Setting",
+      "title": "Claude Code Proxy",
       "properties": {
-        "cc-switch.configFilePath": {
+        "claude-code-proxy.configFilePath": {
           "type": "string",
           "default": "",
           "markdownDescription": "Override the Claude Code settings.json path. Leave empty to auto-detect (`~/.claude/settings.json` on all platforms, including WSL)."

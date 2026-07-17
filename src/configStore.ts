@@ -31,7 +31,7 @@ export class ConfigStore {
         } catch (err: unknown) {
             if (!isENOENT(err)) {
                 // Corrupt file: surface but don't crash — start empty.
-                console.error('[cc-switch] Failed to read configs.json:', err);
+                console.error('[claude-code-proxy] Failed to read configs.json:', err);
             }
             this.cache = [];
         }

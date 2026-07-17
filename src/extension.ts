@@ -16,13 +16,13 @@ export function activate(context: vscode.ExtensionContext): void {
     const store = new ConfigStore(context.globalStorageUri);
     const activeState = new ActiveStateStore(context.globalStorageUri);
     const proxyToggle = new ProxyToggleStore();
-    const output = vscode.window.createOutputChannel('CC Switch + Proxy');
+    const output = vscode.window.createOutputChannel('Claude Code Proxy');
     context.subscriptions.push(output);
     proxyHost = new ProxyHost(context, output, proxyToggle);
 
     const treeProvider = new ConfigTreeProvider(store, activeState);
 
-    const treeView = vscode.window.createTreeView('cc-switch.configs', {
+    const treeView = vscode.window.createTreeView('claude-code-proxy.configs', {
         treeDataProvider: treeProvider,
         showCollapseAll: false,
     });
@@ -40,8 +40,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // --- Status bar indicator ---
     const statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
-    statusItem.command = 'cc-switch.openView';
-    statusItem.tooltip = 'Claude Code Switch Setting — click to open';
+    statusItem.command = 'claude-code-proxy.openView';
+    statusItem.tooltip = 'Claude Code Proxy — click to open';
     context.subscriptions.push(statusItem);
 
     async function updateStatusBar(): Promise<void> {
@@ -206,11 +206,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // --- Commands ---
     context.subscriptions.push(
-        vscode.commands.registerCommand('cc-switch.newConfig', () => {
+        vscode.commands.registerCommand('claude-code-proxy.newConfig', () => {
             void editor.openNew();
         }),
 
-        vscode.commands.registerCommand('cc-switch.editConfig', (arg?: LLMConfig | vscode.TreeItem) => {
+        vscode.commands.registerCommand('claude-code-proxy.editConfig', (arg?: LLMConfig | vscode.TreeItem) => {
             const cfg = resolveConfig(arg);
             if (!cfg) {
                 void pickConfig('edit').then(c => { if (c) { void editor.openEdit(c); } });
@@ -219,7 +219,7 @@ export function activate(context: vscode.ExtensionContext): void {
             void editor.openEdit(cfg);
         }),
 
-        vscode.commands.registerCommand('cc-switch.switchConfig', (arg?: LLMConfig | vscode.TreeItem) => {
+        vscode.commands.registerCommand('claude-code-proxy.switchConfig', (arg?: LLMConfig | vscode.TreeItem) => {
             const cfg = resolveConfig(arg);
             if (!cfg) {
                 void pickConfig('switch to').then(c => { if (c) { void doSwitch(c); } });
@@ -228,7 +228,7 @@ export function activate(context: vscode.ExtensionContext): void {
             void doSwitch(cfg);
         }),
 
-        vscode.commands.registerCommand('cc-switch.deleteConfig', async (arg?: LLMConfig | vscode.TreeItem) => {
+        vscode.commands.registerCommand('claude-code-proxy.deleteConfig', async (arg?: LLMConfig | vscode.TreeItem) => {
             const target = resolveConfig(arg) ?? await pickConfig('delete');
             if (!target) {
                 return;
@@ -237,23 +237,23 @@ export function activate(context: vscode.ExtensionContext): void {
             await refresh();
         }),
 
-        vscode.commands.registerCommand('cc-switch.refresh', () => {
+        vscode.commands.registerCommand('claude-code-proxy.refresh', () => {
             void refresh();
         }),
 
-        vscode.commands.registerCommand('cc-switch.openView', () => {
-            void vscode.commands.executeCommand('cc-switch.configs.focus');
+        vscode.commands.registerCommand('claude-code-proxy.openView', () => {
+            void vscode.commands.executeCommand('claude-code-proxy.configs.focus');
         }),
 
         // --- Export all configs to a JSON file ---
-        vscode.commands.registerCommand('cc-switch.exportConfigs', async () => {
+        vscode.commands.registerCommand('claude-code-proxy.exportConfigs', async () => {
             const configs = await store.load();
             if (configs.length === 0) {
                 void vscode.window.showInformationMessage('No configs to export.');
                 return;
             }
             const uri = await vscode.window.showSaveDialog({
-                defaultUri: vscode.Uri.file('cc-switch-configs.json'),
+                defaultUri: vscode.Uri.file('claude-code-proxy-configs.json'),
                 filters: { 'JSON': ['json'] },
                 title: 'Export Configs',
             });
@@ -271,7 +271,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
 
         // --- Import configs from a JSON file (skip duplicates by id) ---
-        vscode.commands.registerCommand('cc-switch.importConfigs', async () => {
+        vscode.commands.registerCommand('claude-code-proxy.importConfigs', async () => {
             const uris = await vscode.window.showOpenDialog({
                 filters: { 'JSON': ['json'] },
                 title: 'Import Configs',
@@ -345,7 +345,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // React to override-path setting changes.
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration('cc-switch.configFilePath')) {
+            if (e.affectsConfiguration('claude-code-proxy.configFilePath')) {
                 void refresh();
             }
         }),
@@ -353,7 +353,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // 打开代理 Web 控制台（重试参数 + trace）
     context.subscriptions.push(
-        vscode.commands.registerCommand('cc-switch.openProxyUI', async () => {
+        vscode.commands.registerCommand('claude-code-proxy.openProxyUI', async () => {
             const port = proxyHost?.getPort() ?? 11434;
             await vscode.env.openExternal(vscode.Uri.parse(`http://127.0.0.1:${port}/`));
         }),
@@ -361,7 +361,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Kill 代理：任意窗口都能调，关闭 11434 上的代理监听，宿主心跳 2s 内自动重起
     context.subscriptions.push(
-        vscode.commands.registerCommand('cc-switch.killProxy', async () => {
+        vscode.commands.registerCommand('claude-code-proxy.killProxy', async () => {
             if (!proxyHost) {
                 void vscode.window.showWarningMessage('代理尚未初始化');
                 return;
@@ -378,13 +378,13 @@ export function activate(context: vscode.ExtensionContext): void {
     // 同步「backup proxy 开关」上下文键，供树视图标题栏按钮用 when 子句切换开/关图标
     async function syncProxyToggleContext(): Promise<void> {
         const enabled = proxyToggle.isEnabled();
-        await vscode.commands.executeCommand('setContext', 'cc-switch.proxyToggleEnabled', enabled);
+        await vscode.commands.executeCommand('setContext', 'claude-code-proxy.proxyToggleEnabled', enabled);
     }
 
     // backup proxy 本窗口开关（树视图标题栏按钮 + 命令面板）。只控本窗口，不管其他窗口是否接管。
     // 关：本窗口若是宿主则停进程，此后心跳不接管。开：复用其他窗口或自己起。
     context.subscriptions.push(
-        vscode.commands.registerCommand('cc-switch.toggleProxyBackup', async () => {
+        vscode.commands.registerCommand('claude-code-proxy.toggleProxyBackup', async () => {
             if (!proxyHost) {
                 void vscode.window.showWarningMessage('代理尚未初始化');
                 return;
@@ -399,11 +399,11 @@ export function activate(context: vscode.ExtensionContext): void {
             }
         }),
         // 标题栏两个图标按钮各自指向同一 toggle 逻辑（按钮本身是开/关的视觉态）
-        vscode.commands.registerCommand('cc-switch.toggleProxyBackupOn', () => {
-            void vscode.commands.executeCommand('cc-switch.toggleProxyBackup');
+        vscode.commands.registerCommand('claude-code-proxy.toggleProxyBackupOn', () => {
+            void vscode.commands.executeCommand('claude-code-proxy.toggleProxyBackup');
         }),
-        vscode.commands.registerCommand('cc-switch.toggleProxyBackupOff', () => {
-            void vscode.commands.executeCommand('cc-switch.toggleProxyBackup');
+        vscode.commands.registerCommand('claude-code-proxy.toggleProxyBackupOff', () => {
+            void vscode.commands.executeCommand('claude-code-proxy.toggleProxyBackup');
         }),
     );
 

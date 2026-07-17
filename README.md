@@ -1,8 +1,8 @@
-# Claude Code Switch + LLM Proxy
+# Claude Code Proxy
 
 一个 VS Code 扩展，合两件事于一身：
 
-1. **管理 + 切换 Claude Code 配置**（原名 cc-switch）：保存多条命名的 LLM 配置（每条是完整 `settings.json` 内容），点一下就切换；支持导入/导出。
+1. **管理 + 切换 Claude Code 配置**（原名 cc-switch，现 claude-code-proxy）：保存多条命名的 LLM 配置（每条是完整 `settings.json` 内容），点一下就切换；支持导入/导出。
 2. **本地 LLM 代理**（原 llmAutoRetry）：每条配置可选"直连"或"通过代理连接"。代理自动重试 Claude Code 处理不了的瞬时错误（如讯飞 503 system busy，code 10310），并提供 Web 控制台看重试参数 + trace 记录。
 
 ## 每条配置的连接模式
@@ -42,7 +42,7 @@
 
 ## 用法
 
-1. 点活动栏的 **Claude Code Switch** 图标。
+1. 点活动栏的 **Claude Code Proxy** 图标。
 2. **+ New LLM Config**，填名字 + settings.json 内容，选"直连"或"通过代理连接"，保存。
 3. 点列表里的配置激活（行内切换图标）。代理模式的配置图标是云朵，直连是圆点。
 4. 命令面板 `LLM 代理: 打开控制台`（或点状态栏云朵图标）打开 Web 控制台：看重试参数、上游配置、端口、trace 记录。
@@ -67,7 +67,7 @@
 
 | Setting | Default | Description |
 |---|---|---|
-| `cc-switch.configFilePath` | `""` | 覆盖 Claude Code `settings.json` 路径，留空自动检测（全平台 `~/.claude/settings.json`，含 WSL）。 |
+| `claude-code-proxy.configFilePath` | `""` | 覆盖 Claude Code `settings.json` 路径，留空自动检测（全平台 `~/.claude/settings.json`，含 WSL）。 |
 
 切换时会先备份原 `settings.json`，并在 toast 里提供 **Reload Window**（让 CC 重读配置）和 **Undo**（回滚到备份）。
 

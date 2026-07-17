@@ -272,7 +272,7 @@ test('H. cleanupOld 删 7 天前的 idx + body + 旧裸文件', async () => {
 //   - 各 outcome/attempt 形态（含 11 次重试、空 body、3xx/4xx 透传）的详情能按 offset 精确读回
 //   - 二次 list 飞快（idx 已建）
 // 没设 REAL_LOG_DIR 则跳过（CI 无外部依赖时）。运行示例：
-//   REAL_LOG_DIR=D:/tmp/cc-switch-log node --test proxy/test/trace-store.test.mjs
+//   REAL_LOG_DIR=D:/tmp/claude-code-proxy-log node --test proxy/test/trace-store.test.mjs
 
 const REAL_LOG_DIR = process.env.REAL_LOG_DIR;
 const realTest = REAL_LOG_DIR && existsSync(REAL_LOG_DIR) ? test : test.skip;

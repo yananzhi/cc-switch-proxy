@@ -73,7 +73,7 @@ export class ProxyHost {
         this.toggle = toggle;
 
         this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
-        this.statusBar.command = 'cc-switch.openProxyUI';
+        this.statusBar.command = 'claude-code-proxy.openProxyUI';
         context.subscriptions.push(this.statusBar);
     }
 

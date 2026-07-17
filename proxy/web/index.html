@@ -332,7 +332,7 @@
     </div>
 
     <div class="card">
-      <h2>当前上游（只读 · 由 cc-switch 激活的"通过代理"配置注入）</h2>
+      <h2>当前上游（只读 · 由 claude-code-proxy 激活的"通过代理"配置注入）</h2>
       <div class="row">
         <label>Base URL</label>
         <input type="text" id="cfg-upstream" style="width:480px" disabled />
@@ -357,7 +357,7 @@
         <input type="text" id="cfg-token" style="width:380px" disabled />
         <span class="hint" id="cfg-token-hint"></span>
       </div>
-      <div class="hint" style="margin-top:6px">上游由 cc-switch 管理。要换上游，请在 cc-switch 里激活另一条"通过代理"配置。</div>
+      <div class="hint" style="margin-top:6px">上游由 claude-code-proxy 管理。要换上游，请在 claude-code-proxy 里激活另一条"通过代理"配置。</div>
     </div>
 
     <div class="card">
@@ -369,7 +369,7 @@
       </div>
       <div class="row">
         <label>改为</label>
-        <input type="text" id="cfg-logsDir-input" style="width:480px" placeholder="绝对路径，如 D:\cc-switch-logs 或 /home/user/logs" />
+        <input type="text" id="cfg-logsDir-input" style="width:480px" placeholder="绝对路径，如 D:\claude-code-proxy-logs 或 /home/user/logs" />
         <span class="hint">留空保存=恢复默认（globalStorage/logs）</span>
       </div>
       <div class="actions">
@@ -393,7 +393,7 @@
       <div class="actions">
         <button class="primary" onclick="savePort()">保存并重启代理</button>
       </div>
-      <div class="hint" style="margin-top:6px;color:var(--amber)">改端口后需重启代理才生效（监听 socket 不能热换）。若当前是"通过代理"模式，重启后请到 cc-switch 重新激活该配置，让 settings.json 的 baseUrl 跟上新端口。</div>
+      <div class="hint" style="margin-top:6px;color:var(--amber)">改端口后需重启代理才生效（监听 socket 不能热换）。若当前是"通过代理"模式，重启后请到 claude-code-proxy 重新激活该配置，让 settings.json 的 baseUrl 跟上新端口。</div>
     </div>
   </section>
 
@@ -574,7 +574,7 @@ async function savePort() {
     toast('端口必须是 1024..65535 的整数', false);
     return;
   }
-  if (!confirm(`改端口为 ${n}？\n将关闭代理监听，宿主心跳 2s 内用新端口重起。\n若当前是"通过代理"模式，重起后请到 cc-switch 重新激活该配置，让 settings.json 的 baseUrl 跟上新端口。`)) return;
+  if (!confirm(`改端口为 ${n}？\n将关闭代理监听，宿主心跳 2s 内用新端口重起。\n若当前是"通过代理"模式，重起后请到 claude-code-proxy 重新激活该配置，让 settings.json 的 baseUrl 跟上新端口。`)) return;
   try {
     const r = await (await fetch('/api/port', {
       method: 'POST', headers: { 'content-type': 'application/json' },
