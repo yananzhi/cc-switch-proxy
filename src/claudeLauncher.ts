@@ -23,8 +23,10 @@ const WORKSPACE_CONFIG_DIR = '.claude_proxy';
  * 无 local active 则不写 settings.json，claude 用默认。不再读取 global activeState。
  *
  * 硬约束：
- * - shell：Windows 强制 PowerShell（用户 VS Code 默认终端可能是 Git Bash，反斜杠路径会出转义问题）；
- *   Linux/macOS 不传 shellPath，用平台默认 bash。
+ * - shell：Windows 强制 PowerShell——启动命令用 PowerShell 调用操作符 `& "path"`，
+ *   若默认终端是 Git Bash 会因不认 `&` 报错；统一 PowerShell 保证命令语法正确解析。
+ *   （路径转义不是问题：env 进程级注入、settings.json 由扩展写、二进制路径用引号包。）
+ *   Linux/macOS 不传 shellPath，用平台默认 shell。
  * - env 用 createTerminal 的 env 选项进程级注入，跨 shell 无需区分语法。
  * - 二进制用完整绝对路径调用，不依赖 PATH。
  */
@@ -100,6 +102,13 @@ export class ClaudeLauncher {
                     : undefined,
             };
             await this.proxyHost.setUpstream(upstreamEnv);
+            // ⚠️ 代理上游是全局共享单例（见 docs/pitfall-proxy-shared-upstream.md）：
+            // 若同时有别的 proxy 会话用了不同上游，此处会把全局上游改成本配置的上游，
+            // 导致旧会话的请求被转发到错误后端（静默串味，无报错）。记日志便于事后排查。
+            this.output.appendLine(
+                `[launcher] 已注入全局代理上游: baseUrl=${upstreamEnv.baseUrl} model=${upstreamEnv.model ?? '(unset)'}（来自 local 配置 '${cfg.name}'）。` +
+                `注意：代理进程全局共享，若并发的其它 proxy 会话用不同上游，会互相串味。`,
+            );
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             void vscode.window.showErrorMessage(`代理模式启动/注入失败: ${msg}`);
@@ -118,7 +127,9 @@ export class ClaudeLauncher {
 
     /**
      * 往项目级 `.claude/settings.local.json` 合并 `permissions.defaultMode = bypassPermissions`。
-     * - 读已有内容 parse（不存在/损坏则从 `{}` 开始），只覆盖 defaultMode，保留其余字段。
+     * - 读已有内容 parse（不存在/损坏则从 `{}` 开始），仅当 defaultMode 未设置时写入，保留其余字段。
+     * - 已显式设置别的 defaultMode（如 acceptEdits / plan / default）则不覆盖——那是用户为安全
+     *   刻意选的，静默降级到 bypassPermissions 会扩大权限且无提示。记日志提示用户自行决定。
      * - 项目级文件跟 workspace 绑定，不污染全局；claude 自动会创建 `.claude/`，这里只补 permissions。
      */
     private async ensureProjectPermissions(workspaceRoot: string): Promise<void> {
@@ -144,6 +155,13 @@ export class ClaudeLauncher {
         if (perms.defaultMode === 'bypassPermissions') {
             return; // 已经是目标值，不必写
         }
+        if (perms.defaultMode !== undefined) {
+            // 用户已显式选了别的模式（acceptEdits/plan/default…）——尊重它，不静默降权。
+            this.output.appendLine(
+                `[launcher] ${localSettingsPath} 已设 permissions.defaultMode=${perms.defaultMode}，保留用户选择，未覆盖为 bypassPermissions。`,
+            );
+            return;
+        }
         perms.defaultMode = 'bypassPermissions';
         obj.permissions = perms;
         await fs.promises.mkdir(projectClaudeDir, { recursive: true });
@@ -153,8 +171,11 @@ export class ClaudeLauncher {
 
     /**
      * 若 workspace 是 git 仓库（检测 .git 目录存在，不依赖 git 命令，跨平台可靠），
-     * 且 .gitignore 未含 `.claude_proxy/`，则追加一行。非 git 仓库跳过，不创建 .gitignore。
-     * 换行用 LF（跨平台一致），已含则不重复追加。
+     * 且 .gitignore 未忽略 `.claude_proxy`，则追加一行 `.claude_proxy/`。非 git 仓库跳过，
+     * 不创建 .gitignore。换行用 LF（跨平台一致），已忽略则不重复追加。
+     *
+     * 去重判定归一化尾斜杠：`.claude_proxy/` 与 `.claude_proxy` 都算已忽略该目录，
+     * 避免用户写了无斜杠版时仍被追加一条重复行。
      */
     private async ensureGitignore(workspaceRoot: string): Promise<void> {
         try {
@@ -170,10 +191,12 @@ export class ClaudeLauncher {
                 if (!isENOENT(err)) { throw err; }
                 // 不存在视为空，下面会创建
             }
-            const lines = existing.split(/\r?\n/);
-            const present = lines.some(l => l.trim() === '.claude_proxy/');
+            // 归一化：去首尾空白 + 去尾斜杠，`./.claude_proxy/` 之类也算同一规则
+            const normalize = (s: string) => s.trim().replace(/\/+$/, '').replace(/^\.\//, '');
+            const target = normalize('.claude_proxy/');
+            const present = existing.split(/\r?\n/).some(l => normalize(l) === target);
             if (present) {
-                return; // 已含，不重复追加
+                return; // 已忽略，不重复追加
             }
             const prefix = (existing.length > 0 && !existing.endsWith('\n')) ? '\n' : '';
             const next = `${existing}${prefix}.claude_proxy/\n`;
@@ -240,9 +263,11 @@ export class ClaudeLauncher {
             // d2. 项目级 permissions：往 {workspace}/.claude/settings.local.json 合并 bypassPermissions
             await this.ensureProjectPermissions(workspace.uri.fsPath);
 
-            // e. 建终端：env 进程级注入 CLAUDE_CONFIG_DIR。
-            // Windows 强制 PowerShell（用户 VS Code 默认终端可能是 Git Bash，会带来反斜杠转义问题）；
-            // Linux/macOS 不传 shellPath，用平台默认 bash。
+            // e. 建终端：env 用 createTerminal 的 env 选项进程级注入 CLAUDE_CONFIG_DIR，
+            //    跨 shell 无需区分语法、也不经过 shell 解析（路径里的反斜杠/空格不会出转义问题）。
+            // Windows 强制 PowerShell：下方 invoke 用 PowerShell 调用操作符 `& "path"` 启动二进制，
+            //   若用户 VS Code 默认终端是 Git Bash，bash 不认 `&` 作调用符会报错；统一 PowerShell 保证
+            //   命令语法被正确解析。Linux/macOS 不传 shellPath，用平台默认 shell（bash 直接引号路径即可）。
             const isWin = process.platform === 'win32';
             const terminalOptions: vscode.TerminalOptions = {
                 name: 'Claude Code (Workspace)',
