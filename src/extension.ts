@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import type { LLMConfig } from './types';
-import { ConfigStore } from './configStore';
+import { ConfigStore, newId } from './configStore';
 import { ActiveStateStore } from './activeState';
 import { ProxyToggleStore } from './proxyToggle';
 import { ProxyHost } from './proxyHost';
@@ -344,6 +344,53 @@ export function activate(context: vscode.ExtensionContext): void {
                 await localActiveState?.clear();
             }
             await refresh();
+        }),
+
+        // 一键导入所有 Global LLM Config 到 Workspace Local（跳过同名/同 id 重复项）
+        vscode.commands.registerCommand('claude-code-proxy.importGlobalToLocal', async () => {
+            if (!localStore) {
+                void vscode.window.showErrorMessage('请先打开一个 workspace 文件夹');
+                return;
+            }
+            const globalConfigs = await store.load();
+            if (globalConfigs.length === 0) {
+                void vscode.window.showInformationMessage('Global 配置为空，没有可导入的项。');
+                return;
+            }
+            const localConfigs = await localStore.load();
+            const localIds = new Set(localConfigs.map(c => c.id));
+            const localNames = new Set(localConfigs.map(c => c.name));
+            let added = 0;
+            let skipped = 0;
+            for (const g of globalConfigs) {
+                if (localIds.has(g.id) || localNames.has(g.name)) {
+                    skipped++;
+                    continue;
+                }
+                // 生成新 id 避免与 local 已有的冲突（即使 name 不重复，id 可能碰巧相同）
+                const cfg: LLMConfig = {
+                    ...g,
+                    id: localIds.has(g.id) ? newId() : g.id,
+                    updatedAt: new Date().toISOString(),
+                };
+                localConfigs.push(cfg);
+                localIds.add(cfg.id);
+                localNames.add(cfg.name);
+                added++;
+            }
+            if (added === 0) {
+                void vscode.window.showInformationMessage(
+                    `所有 ${globalConfigs.length} 条 Global 配置已存在于 Workspace Local 中，无需导入。`,
+                );
+                return;
+            }
+            await localStore.save(localConfigs);
+            await refresh();
+            const parts = [`已导入 ${added} 条 Global 配置到 Workspace Local。`];
+            if (skipped > 0) {
+                parts.push(`${skipped} 条跳过（同名或同 id 重复）。`);
+            }
+            void vscode.window.showInformationMessage(parts.join(' '));
         }),
 
         vscode.commands.registerCommand('claude-code-proxy.refresh', () => {

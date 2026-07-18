@@ -259,14 +259,14 @@
 <header>
   <h1>LLM Gateway</h1>
   <nav>
-    <button id="tab-config" class="active" onclick="showTab('config')">配置</button>
-    <button id="tab-traces" onclick="showTab('traces')">重试记录</button>
+    <button id="tab-config" onclick="showTab('config')">配置</button>
+    <button id="tab-traces" class="active" onclick="showTab('traces')">重试记录</button>
   </nav>
 </header>
 
 <main>
   <!-- 配置页 -->
-  <section id="page-config">
+  <section id="page-config" style="display:none">
     <div class="card mode-card">
       <label class="switch">
         <input type="checkbox" id="cfg-passthrough" onchange="togglePassthrough(this.checked)" />
@@ -398,7 +398,7 @@
   </section>
 
   <!-- 重试记录页 -->
-  <section id="page-traces" style="display:none">
+  <section id="page-traces">
     <div class="card">
       <h2>成功命令统计 <span style="text-transform:none;letter-spacing:0;color:var(--muted);font-weight:400;font-size:12px">· 按时间窗口统计最终交付成功（2xx）的命令数</span></h2>
       <div class="stats-row" id="stats-row"></div>
@@ -725,8 +725,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
   });
-  // 初始加载
-  showTab('config');
+  // 初始加载：默认显示重试记录页
+  showTab('traces');
 });
 
 async function saveConfig() {

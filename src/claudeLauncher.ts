@@ -265,23 +265,29 @@ export class ClaudeLauncher {
 
             // e. 建终端：env 用 createTerminal 的 env 选项进程级注入 CLAUDE_CONFIG_DIR，
             //    跨 shell 无需区分语法、也不经过 shell 解析（路径里的反斜杠/空格不会出转义问题）。
-            // Windows 强制 PowerShell：下方 invoke 用 PowerShell 调用操作符 `& "path"` 启动二进制，
+            // Windows 强制 PowerShell：下方 invoke 用 PowerShell 调用操作符 `& $env:CLAUDE_BIN` 启动二进制，
             //   若用户 VS Code 默认终端是 Git Bash，bash 不认 `&` 作调用符会报错；统一 PowerShell 保证
             //   命令语法被正确解析。Linux/macOS 不传 shellPath，用平台默认 shell（bash 直接引号路径即可）。
+            //
+            // 二进制路径通过 env 注入（CLAUDE_BIN），终端命令只引用环境变量而不内嵌长路径——
+            //   避免长路径被 sendText 逐字符发送时终端视觉折行，导致上键历史不完整。
             const isWin = process.platform === 'win32';
             const terminalOptions: vscode.TerminalOptions = {
                 name: 'Claude Code (Workspace)',
                 cwd: workspace.uri.fsPath,
-                env: { CLAUDE_CONFIG_DIR: configDir },
+                env: {
+                    CLAUDE_CONFIG_DIR: configDir,
+                    CLAUDE_BIN: binaryPath,
+                },
             };
             if (isWin) {
                 terminalOptions.shellPath = 'powershell.exe';
             }
             const terminal = vscode.window.createTerminal(terminalOptions);
             terminal.show();
-            // 发完整二进制路径（引号包空格），自动回车执行进交互式 CLI。单条命令一行。
-            // PowerShell 用调用操作符 & 执行带空格/反斜杠的路径；bash 直接引号路径即可。
-            const invoke = isWin ? `& "${binaryPath}"` : `"${binaryPath}"`;
+            // 命令只引用环境变量，短小精悍，保证终端历史一行完整。
+            // PowerShell: & $env:CLAUDE_BIN  |  bash: "$CLAUDE_BIN"
+            const invoke = isWin ? '& $env:CLAUDE_BIN' : '"$CLAUDE_BIN"';
             terminal.sendText(invoke, true);
 
             this.output.appendLine(`[launcher] 已启动 workspace 独立 Claude 会话: ${binaryPath} (shell=${isWin ? 'powershell' : 'default'})`);

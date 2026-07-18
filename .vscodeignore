@@ -11,3 +11,6 @@ mock/**
 proxy/logs/**
 proxy/test/**
 .test-tmp/**
+.claude/**
+.claude_proxy/**
+docs/**
