@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Claude Code Proxy — 多窗口共享架构与隔离缺陷</title>
+<style>
+  :root{
+    --vscode:#1e1e1e; --bg:#0d1117; --panel:#161b22; --border:#30363d;
+    --txt:#e6edf3; --mute:#8b949e; --accent:#58a6ff; --green:#3fb950;
+    --orange:#d29922; --red:#f85149; --purple:#bc8cff; --line:#484f58;
+    --yellow:#e3b341; --pink:#f778ba;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:'Segoe UI',system-ui,sans-serif;padding:24px;line-height:1.5}
+  h1{font-size:22px;border-bottom:2px solid var(--border);padding-bottom:8px;margin:0 0 6px}
+  .sub{color:var(--mute);font-size:13px;margin-bottom:28px}
+  h2{font-size:17px;color:var(--accent);margin:36px 0 4px;display:flex;align-items:center;gap:8px}
+  h2 .num{background:var(--accent);color:#000;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+  .cap{color:var(--mute);font-size:13px;margin:0 0 16px}
+  figure{margin:0 0 30px}
+  svg{width:100%;max-width:1100px;height:auto;display:block;background:var(--panel);border:1px solid var(--border);border-radius:10px}
+  figcaption{font-size:12px;color:var(--mute);margin-top:8px;text-align:center}
+
+  .box{fill:var(--panel);stroke:var(--border);stroke-width:1.5}
+  .box-vscode{stroke:var(--accent);stroke-width:2}
+  .box-workspace{stroke:var(--green);stroke-width:1.5;stroke-dasharray:6 3}
+  .box-official{stroke:var(--purple);stroke-width:1.5}
+  .box-proxy-ext{stroke:var(--yellow);stroke-width:1.5}
+  .box-cli{stroke:var(--pink);stroke-width:1.5}
+  .box-proxy{stroke:var(--orange);stroke-width:2}
+  .box-llm{stroke:var(--green);stroke-width:2}
+  .box-config{fill:#21262d;stroke:var(--border);stroke-width:1}
+  .box-danger{stroke:var(--red);stroke-width:2;stroke-dasharray:8 4}
+
+  .title{font-size:14px;font-weight:700;fill:var(--txt)}
+  .subt{font-size:11px;fill:var(--mute)}
+  .lbl{font-size:11px;fill:var(--txt)}
+  .lbl-mute{font-size:11px;fill:var(--mute)}
+  .lbl-key{font-size:11px;fill:var(--orange);font-weight:600}
+  .lbl-red{font-size:11px;fill:var(--red);font-weight:600}
+  .lbl-green{font-size:11px;fill:var(--green);font-weight:600}
+  .lbl-purple{font-size:11px;fill:var(--purple);font-weight:600}
+
+  .flow{fill:none;stroke-width:2;stroke-linecap:round}
+  .flow-data{stroke:var(--green);marker-end:url(#arrowG)}
+  .flow-rewrite{stroke:var(--orange);stroke-dasharray:6 4;marker-end:url(#arrowO)}
+  .flow-ctrl{stroke:var(--accent);stroke-dasharray:2 3;marker-end:url(#arrowB)}
+  .flow-read{stroke:var(--purple);stroke-dasharray:4 3;marker-end:url(#arrowP)}
+  .flow-env{stroke:var(--yellow);stroke-dasharray:3 3;marker-end:url(#arrowY)}
+  .flow-danger{stroke:var(--red);stroke-width:2.5;stroke-dasharray:8 4;marker-end:url(#arrowR)}
+  .flow-share{stroke:var(--red);stroke-width:1.5;stroke-dasharray:4 4;opacity:0.6}
+
+  .pill{fill:#21262d;stroke:var(--border);stroke-width:1}
+  .pill-txt{font-size:10px;fill:var(--txt)}
+  .pill-key{font-size:10px;fill:var(--orange)}
+
+  .danger-zone{fill:rgba(248,81,73,0.06);stroke:var(--red);stroke-width:2;stroke-dasharray:8 4;rx:12}
+
+  .note{background:#161b22;border:1px solid var(--border);border-left:3px solid var(--orange);padding:12px 14px;border-radius:6px;font-size:13px;margin:12px 0}
+  .note b{color:var(--orange)}
+  .note-red{background:#161b22;border:1px solid var(--border);border-left:3px solid var(--red);padding:12px 14px;border-radius:6px;font-size:13px;margin:12px 0}
+  .note-red b{color:var(--red)}
+  .note-green{background:#161b22;border:1px solid var(--border);border-left:3px solid var(--green);padding:12px 14px;border-radius:6px;font-size:13px;margin:12px 0}
+  .note-green b{color:var(--green)}
+
+  table{border-collapse:collapse;width:100%;max-width:1100px;font-size:13px;margin:8px 0 24px}
+  th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#21262d;color:var(--accent)}
+  code{background:#21262d;padding:1px 5px;border-radius:4px;font-size:12px;color:var(--green)}
+
+  .legend{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:var(--mute);margin:10px 0 24px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .swatch{width:22px;height:0;border-top:2.2px solid}
+  .sw-data{border-color:var(--green)}
+  .sw-rewrite{border-color:var(--orange);border-top-style:dashed}
+  .sw-ctrl{border-color:var(--accent);border-top-style:dashed}
+  .sw-read{border-color:var(--purple);border-top-style:dashed}
+  .sw-env{border-color:var(--yellow);border-top-style:dashed}
+  .sw-danger{border-color:var(--red);border-top-style:dashed}
+  .sw-share{border-color:var(--red);border-top-style:dashed;opacity:0.6}
+</style>
+</head>
+<body>
+
+<h1>Claude Code Proxy — 多窗口共享架构与隔离缺陷</h1>
+<p class="sub">当前架构中，所有 VS Code 窗口共享同一个 Proxy Backend 进程和同一份 <code>~/.claude/settings.json</code>，导致「Workspace Local LLM Config」并未真正实现 per-workspace 隔离。</p>
+
+<div class="legend">
+  <span><i class="swatch sw-data"></i>数据流（HTTP 请求）</span>
+  <span><i class="swatch sw-rewrite"></i>改写配置 / 注入上游</span>
+  <span><i class="swatch sw-read"></i>读取配置文件</span>
+  <span><i class="swatch sw-env"></i>环境变量注入</span>
+  <span><i class="swatch sw-danger"></i>隔离缺陷（串味路径）</span>
+  <span><i class="swatch sw-share"></i>共享（全局单例）</span>
+</div>
+
+<!-- ===================================================== 图1：完整架构 -->
+<h2><span class="num">1</span>完整架构：多窗口共享单例</h2>
+<p class="cap">两个 VS Code 窗口打开不同 Workspace，各自有独立的 Local Config，但共享同一个 Proxy Backend 进程和同一个 Upstream 出口。官方 Claude Code 插件 UI 无法注入 <code>CLAUDE_CONFIG_DIR</code>，只能读全局 <code>~/.claude/settings.json</code>。</p>
+
+<figure>
+<svg viewBox="0 0 1100 720" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowG" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#3fb950"/></marker>
+    <marker id="arrowO" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#d29922"/></marker>
+    <marker id="arrowB" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#58a6ff"/></marker>
+    <marker id="arrowP" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#bc8cff"/></marker>
+    <marker id="arrowY" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#e3b341"/></marker>
+    <marker id="arrowR" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#f85149"/></marker>
+  </defs>
+
+  <!-- ==================== VS Code 窗口 A ==================== -->
+  <rect class="box box-vscode" x="20" y="30" width="440" height="660" rx="12"/>
+  <text class="title" x="240" y="56" text-anchor="middle">VS Code 窗口 A</text>
+  <text class="subt"  x="240" y="72" text-anchor="middle">Workspace: /project-alpha</text>
+
+    <!-- Workspace A 虚框 -->
+    <rect class="box box-workspace" x="40" y="86" width="400" height="590" rx="8"/>
+    <text class="lbl-green" x="55" y="104">Workspace A — /project-alpha</text>
+
+    <!-- 官方 Claude Code 插件 UI -->
+    <rect class="box box-official" x="60" y="116" width="180" height="100" rx="8"/>
+    <text class="title" x="150" y="138" text-anchor="middle" fill="#bc8cff">Claude Code</text>
+    <text class="subt"  x="150" y="154" text-anchor="middle" fill="#bc8cff">官方插件 UI</text>
+    <text class="lbl-mute" x="150" y="174" text-anchor="middle">侧边栏 / 聊天面板</text>
+    <text class="lbl-red"  x="150" y="192" text-anchor="middle">⚠ 无法注入 CLAUDE_CONFIG_DIR</text>
+    <text class="lbl-red"  x="150" y="206" text-anchor="middle">只能读全局 settings.json</text>
+
+    <!-- proxy 扩展 UI -->
+    <rect class="box box-proxy-ext" x="260" y="116" width="160" height="100" rx="8"/>
+    <text class="title" x="340" y="138" text-anchor="middle" fill="#e3b341">claude-code-proxy</text>
+    <text class="subt"  x="340" y="154" text-anchor="middle" fill="#e3b341">扩展 UI (Tree View)</text>
+    <text class="lbl-mute" x="340" y="174" text-anchor="middle">管理 Global/Local 配置</text>
+    <text class="lbl-mute" x="340" y="190" text-anchor="middle">触发 Launcher 启动 CLI</text>
+
+    <!-- Local Config A -->
+    <rect class="box box-config" x="60" y="236" width="180" height="80" rx="6"/>
+    <text class="title" x="150" y="256" text-anchor="middle" font-size="12">Local Config A</text>
+    <text class="lbl-mute" x="75" y="274">/project-alpha/.claude_proxy/</text>
+    <text class="lbl-key"  x="75" y="290">local-configs.json</text>
+    <text class="lbl-mute" x="75" y="306">local-active.json</text>
+
+    <!-- settings.json A (workspace local) -->
+    <rect class="pill" x="60" y="330" width="180" height="56" rx="6"/>
+    <text class="pill-txt" x="150" y="348" text-anchor="middle">.claude_proxy/settings.json</text>
+    <text class="pill-key" x="150" y="364" text-anchor="middle">BASE_URL = 127.0.0.1:port</text>
+    <text class="pill-txt" x="150" y="378" text-anchor="middle">（proxy 模式，指向本地代理）</text>
+
+    <!-- CLI A (Launcher 启动) -->
+    <rect class="box box-cli" x="260" y="236" width="160" height="80" rx="8"/>
+    <text class="title" x="340" y="258" text-anchor="middle" fill="#f778ba">Claude Code CLI</text>
+    <text class="subt"  x="340" y="274" text-anchor="middle" fill="#f778ba">终端进程 A</text>
+    <text class="lbl-mute" x="340" y="292" text-anchor="middle">CLAUDE_CONFIG_DIR=</text>
+    <text class="lbl-key"  x="340" y="306" text-anchor="middle">.claude_proxy/</text>
+
+    <!-- 官方插件内部 CLI -->
+    <rect class="box box-official" x="60" y="404" width="360" height="56" rx="6" fill="#1a1520" stroke-dasharray="4 3"/>
+    <text class="lbl-purple" x="240" y="424" text-anchor="middle">官方插件内部驱动的 CLI binary（resources/native-binary/claude.exe）</text>
+    <text class="lbl-red"  x="240" y="442" text-anchor="middle">⚠ 无 CLAUDE_CONFIG_DIR → 读 ~/.claude/settings.json（全局共享）</text>
+
+    <!-- 官方插件 UI → 读全局 settings.json -->
+    <path class="flow flow-read" d="M150 216 L 150 330"/>
+    <text class="lbl-purple" x="158" y="278" font-size="10">读全局配置</text>
+
+    <!-- CLI A → 读 workspace settings.json -->
+    <path class="flow flow-read" d="M260 280 L 240 280 L 240 356 L 240 356"/>
+    <text class="lbl" x="200" y="348" font-size="10" fill="#f778ba">读本地配置</text>
+
+    <!-- proxy 扩展 → 写 workspace settings.json -->
+    <path class="flow flow-rewrite" d="M340 216 C 340 240, 240 240, 240 330"/>
+    <text class="lbl-key" x="300" y="248" font-size="10">Launcher 写入</text>
+
+    <!-- proxy 扩展 → setUpstream -->
+    <path class="flow flow-rewrite" d="M420 166 L 560 166"/>
+    <text class="lbl-key" x="490" y="158" text-anchor="middle">setUpstream(A)</text>
+
+    <!-- CLI A → Proxy (数据流) -->
+    <path class="flow flow-data" d="M340 316 C 440 316, 500 280, 560 280"/>
+    <text class="lbl" x="460" y="290" text-anchor="middle">HTTP 请求</text>
+
+    <!-- 官方插件内部 CLI → Proxy (数据流) -->
+    <path class="flow flow-data" d="M420 432 C 490 432, 520 300, 560 300"/>
+    <text class="lbl-purple" x="490" y="380" text-anchor="middle" font-size="10">HTTP 请求</text>
+
+  <!-- ==================== VS Code 窗口 B ==================== -->
+  <rect class="box box-vscode" x="20" y="30" width="440" height="660" rx="12" transform="translate(0,0)" style="display:none"/>
+
+  <!-- 用偏移画窗口 B，放在窗口 A 下方 -->
+  <!-- 实际上我们并排放，但空间不够，改为上下结构 -->
+  <!-- 改为：窗口 A 在左，窗口 B 在右，Proxy 在中间 -->
+
+</svg>
+</figure>
+
+<!-- 重新设计布局：左右两个窗口 + 中间 Proxy + 右侧 LLM -->
+<figure>
+<svg viewBox="0 0 1100 820" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowG" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#3fb950"/></marker>
+    <marker id="arrowO" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#d29922"/></marker>
+    <marker id="arrowB" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#58a6ff"/></marker>
+    <marker id="arrowP" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#bc8cff"/></marker>
+    <marker id="arrowY" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#e3b341"/></marker>
+    <marker id="arrowR" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#f85149"/></marker>
+  </defs>
+
+  <!-- ==================== VS Code 窗口 A (左) ==================== -->
+  <rect class="box box-vscode" x="16" y="20" width="310" height="780" rx="12"/>
+  <text class="title" x="171" y="46" text-anchor="middle">VS Code 窗口 A</text>
+  <text class="subt"  x="171" y="62" text-anchor="middle">Workspace: /project-alpha</text>
+
+    <!-- 官方 Claude Code 插件 UI -->
+    <rect class="box box-official" x="32" y="78" width="278" height="90" rx="8"/>
+    <text class="title" x="171" y="98" text-anchor="middle" fill="#bc8cff">Claude Code 官方插件 UI</text>
+    <text class="lbl-mute" x="171" y="116" text-anchor="middle">侧边栏 / 聊天面板</text>
+    <text class="lbl-red"  x="171" y="134" text-anchor="middle">⚠ 无法注入 CLAUDE_CONFIG_DIR</text>
+    <text class="lbl-red"  x="171" y="150" text-anchor="middle">→ 只能读 ~/.claude/settings.json</text>
+
+    <!-- proxy 扩展 -->
+    <rect class="box box-proxy-ext" x="32" y="180" width="278" height="70" rx="8"/>
+    <text class="title" x="171" y="200" text-anchor="middle" fill="#e3b341">claude-code-proxy 扩展</text>
+    <text class="lbl-mute" x="171" y="218" text-anchor="middle">Tree View + Launcher</text>
+    <text class="lbl-mute" x="171" y="236" text-anchor="middle">管理配置 / 启动 CLI / setUpstream()</text>
+
+    <!-- Local Config A -->
+    <rect class="box box-config" x="32" y="264" width="278" height="70" rx="6"/>
+    <text class="title" x="171" y="284" text-anchor="middle" font-size="12" fill="#3fb950">Workspace A Local Config</text>
+    <text class="lbl-mute" x="48" y="302">/project-alpha/.claude_proxy/</text>
+    <text class="lbl-key"  x="48" y="318">local-configs.json + local-active.json</text>
+
+    <!-- settings.json A -->
+    <rect class="pill" x="32" y="348" width="278" height="48" rx="6"/>
+    <text class="pill-txt" x="171" y="366" text-anchor="middle">.claude_proxy/settings.json</text>
+    <text class="pill-key" x="171" y="382" text-anchor="middle">BASE_URL = 127.0.0.1:port (proxy 模式)</text>
+
+    <!-- CLI A -->
+    <rect class="box box-cli" x="32" y="410" width="278" height="80" rx="8"/>
+    <text class="title" x="171" y="430" text-anchor="middle" fill="#f778ba">Claude Code CLI (终端 A)</text>
+    <text class="subt"  x="171" y="448" text-anchor="middle" fill="#f778ba">由 Launcher 启动</text>
+    <text class="lbl-key"  x="171" y="466" text-anchor="middle">CLAUDE_CONFIG_DIR=.claude_proxy/</text>
+    <text class="lbl-mute" x="171" y="482" text-anchor="middle">→ 读 workspace 本地 settings.json</text>
+
+    <!-- 官方插件内部 CLI -->
+    <rect class="box box-official" x="32" y="504" width="278" height="64" rx="6" fill="#1a1520" stroke-dasharray="4 3"/>
+    <text class="lbl-purple" x="171" y="524" text-anchor="middle">官方插件内部 CLI binary</text>
+    <text class="lbl-red"  x="171" y="542" text-anchor="middle">无 CLAUDE_CONFIG_DIR</text>
+    <text class="lbl-red"  x="171" y="558" text-anchor="middle">→ 读 ~/.claude/settings.json</text>
+
+    <!-- 全局 settings.json 标记 -->
+    <rect class="pill" x="32" y="582" width="278" height="48" rx="6" stroke="#f85149" stroke-width="1.5"/>
+    <text class="pill-txt" x="171" y="600" text-anchor="middle" fill="#f85149">~/.claude/settings.json（全局唯一）</text>
+    <text class="pill-key" x="171" y="616" text-anchor="middle">所有窗口的官方插件 UI 共享此文件</text>
+
+    <!-- 窗口 A 内部连线 -->
+    <!-- 官方插件 UI → 全局 settings.json -->
+    <path class="flow flow-read" d="M171 168 L 171 582"/>
+    <text class="lbl-purple" x="180" y="400" font-size="10">读</text>
+
+    <!-- CLI A → workspace settings.json -->
+    <path class="flow flow-read" d="M120 490 L 120 396"/>
+    <text class="lbl" x="80" y="448" font-size="10" fill="#f778ba">读本地</text>
+
+    <!-- proxy 扩展 → 写 workspace settings.json -->
+    <path class="flow flow-rewrite" d="M222 250 L 222 348"/>
+    <text class="lbl-key" x="230" y="304" font-size="10">写</text>
+
+    <!-- proxy 扩展 → setUpstream -->
+    <path class="flow flow-rewrite" d="M310 215 L 460 215"/>
+    <text class="lbl-key" x="385" y="207" text-anchor="middle">setUpstream(A)</text>
+
+    <!-- CLI A → Proxy -->
+    <path class="flow flow-data" d="M310 450 C 380 450, 400 340, 460 340"/>
+    <text class="lbl" x="385" y="385" text-anchor="middle">HTTP</text>
+
+    <!-- 官方插件内部 CLI → Proxy -->
+    <path class="flow flow-data" d="M310 536 C 370 536, 400 360, 460 360"/>
+    <text class="lbl-purple" x="370" y="460" text-anchor="middle" font-size="10">HTTP</text>
+
+  <!-- ==================== Proxy Backend (中) ==================== -->
+  <rect class="box box-proxy" x="460" y="180" width="200" height="280" rx="12"/>
+  <text class="title" x="560" y="204" text-anchor="middle">Proxy Backend</text>
+  <text class="subt"  x="560" y="220" text-anchor="middle">全局单例进程</text>
+  <text class="lbl-mute" x="560" y="244" text-anchor="middle">监听 127.0.0.1:port</text>
+  <text class="lbl-mute" x="560" y="262" text-anchor="middle">靠 EADDRINUSE 保证单例</text>
+  <text class="lbl-red"  x="560" y="286" text-anchor="middle">⚠ 只有一个 Upstream 出口</text>
+  <text class="lbl-red"  x="560" y="304" text-anchor="middle">last-write-wins</text>
+  <text class="lbl-mute" x="560" y="328" text-anchor="middle">proxy-config.json</text>
+  <text class="lbl-mute" x="560" y="346" text-anchor="middle">env: { baseUrl, token,</text>
+  <text class="lbl-mute" x="560" y="362" text-anchor="middle">      model, timeout }</text>
+  <text class="lbl-key"  x="560" y="386" text-anchor="middle">所有请求 → 同一个 Upstream</text>
+  <text class="lbl-mute" x="560" y="440" text-anchor="middle">2s 心跳 /healthz</text>
+
+  <!-- ==================== VS Code 窗口 B (右下) ==================== -->
+  <rect class="box box-vscode" x="780" y="20" width="300" height="440" rx="12"/>
+  <text class="title" x="930" y="46" text-anchor="middle">VS Code 窗口 B</text>
+  <text class="subt"  x="930" y="62" text-anchor="middle">Workspace: /project-beta</text>
+
+    <!-- 官方 Claude Code 插件 UI B -->
+    <rect class="box box-official" x="796" y="78" width="268" height="90" rx="8"/>
+    <text class="title" x="930" y="98" text-anchor="middle" fill="#bc8cff">Claude Code 官方插件 UI</text>
+    <text class="lbl-mute" x="930" y="116" text-anchor="middle">侧边栏 / 聊天面板</text>
+    <text class="lbl-red"  x="930" y="134" text-anchor="middle">⚠ 无法注入 CLAUDE_CONFIG_DIR</text>
+    <text class="lbl-red"  x="930" y="150" text-anchor="middle">→ 只能读 ~/.claude/settings.json</text>
+
+    <!-- proxy 扩展 B -->
+    <rect class="box box-proxy-ext" x="796" y="180" width="268" height="70" rx="8"/>
+    <text class="title" x="930" y="200" text-anchor="middle" fill="#e3b341">claude-code-proxy 扩展</text>
+    <text class="lbl-mute" x="930" y="218" text-anchor="middle">Tree View + Launcher</text>
+
+    <!-- Local Config B -->
+    <rect class="box box-config" x="796" y="264" width="268" height="70" rx="6"/>
+    <text class="title" x="930" y="284" text-anchor="middle" font-size="12" fill="#3fb950">Workspace B Local Config</text>
+    <text class="lbl-mute" x="812" y="302">/project-beta/.claude_proxy/</text>
+    <text class="lbl-key"  x="812" y="318">local-configs.json + local-active.json</text>
+
+    <!-- CLI B -->
+    <rect class="box box-cli" x="796" y="348" width="268" height="80" rx="8"/>
+    <text class="title" x="930" y="368" text-anchor="middle" fill="#f778ba">Claude Code CLI (终端 B)</text>
+    <text class="subt"  x="930" y="386" text-anchor="middle" fill="#f778ba">由 Launcher 启动</text>
+    <text class="lbl-key"  x="930" y="404" text-anchor="middle">CLAUDE_CONFIG_DIR=.claude_proxy/</text>
+    <text class="lbl-mute" x="930" y="420" text-anchor="middle">→ 读 workspace 本地 settings.json</text>
+
+    <!-- 窗口 B 连线 -->
+    <!-- proxy 扩展 B → setUpstream -->
+    <path class="flow flow-rewrite" d="M796 215 C 730 215, 700 215, 660 215"/>
+    <text class="lbl-key" x="728" y="207" text-anchor="middle" >setUpstream(B)</text>
+
+    <!-- CLI B → Proxy -->
+    <path class="flow flow-data" d="M796 388 C 730 388, 700 360, 660 360"/>
+    <text class="lbl" x="728" y="370" text-anchor="middle">HTTP</text>
+
+    <!-- 官方插件 UI B → 全局 settings.json (跨窗口) -->
+    <path class="flow flow-read" d="M870 168 C 870 580, 500 620, 310 606"/>
+    <text class="lbl-purple" x="600" y="600" text-anchor="middle" font-size="10">读全局 ~/.claude/settings.json</text>
+
+  <!-- ==================== LLM Upstream (右) ==================== -->
+  <rect class="box box-llm" x="780" y="500" width="300" height="130" rx="12"/>
+  <text class="title" x="930" y="524" text-anchor="middle">LLM Upstream</text>
+  <text class="subt"  x="930" y="540" text-anchor="middle">真实 LLM API 后端</text>
+  <text class="lbl-mute" x="930" y="564" text-anchor="middle">baseUrl + token + model</text>
+  <text class="lbl-red"  x="930" y="582" text-anchor="middle">⚠ Proxy 只有一个出口</text>
+  <text class="lbl-red"  x="930" y="600" text-anchor="middle">所有窗口的请求都到同一个后端</text>
+
+  <!-- Proxy → LLM -->
+  <path class="flow flow-data" d="M660 320 C 720 320, 740 560, 780 560"/>
+  <text class="lbl" x="720" y="440" text-anchor="middle">转发</text>
+
+  <!-- ==================== Danger Zone 标注 ==================== -->
+  <!-- 全局 settings.json 共享标注 -->
+  <rect class="danger-zone" x="24" y="574" width="294" height="62" rx="8"/>
+  <text class="lbl-red" x="171" y="630" text-anchor="middle" font-size="12">🔴 隔离缺陷 #1：全局 settings.json 共享</text>
+
+  <!-- Proxy Upstream 共享标注 -->
+  <rect class="danger-zone" x="440" y="470" width="240" height="50" rx="8"/>
+  <text class="lbl-red" x="560" y="500" text-anchor="middle" font-size="12">🔴 隔离缺陷 #2：Upstream 全局单例</text>
+
+  <!-- 串味路径：窗口 B 的 setUpstream 覆盖窗口 A -->
+  <path class="flow flow-danger" d="M796 230 C 740 230, 700 260, 660 260" stroke-width="3"/>
+  <text class="lbl-red" x="730" y="252" text-anchor="middle" font-size="10">覆盖！last-write-wins</text>
+
+</svg>
+<figcaption>图 1 · 完整架构：两个 VS Code 窗口共享同一个 Proxy Backend 进程。官方插件 UI 无法注入 CLAUDE_CONFIG_DIR，只能读全局 settings.json；Proxy 只有一个 Upstream 出口，last-write-wins。</figcaption>
+</figure>
+
+<!-- ===================================================== 图2：两层隔离缺陷详解 -->
+<h2><span class="num">2</span>两层隔离缺陷详解</h2>
+<p class="cap">「Workspace Local LLM Config」看似每个 Workspace 有独立配置，实际上有两层隔离没有做到。</p>
+
+<figure>
+<svg viewBox="0 0 1100 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowG2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#3fb950"/></marker>
+    <marker id="arrowO2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#d29922"/></marker>
+    <marker id="arrowR2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#f85149"/></marker>
+    <marker id="arrowP2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#bc8cff"/></marker>
+  </defs>
+
+  <!-- ===== 缺陷 #1 ===== -->
+  <rect class="danger-zone" x="20" y="20" width="520" height="480" rx="12"/>
+  <text class="title" x="280" y="48" text-anchor="middle" fill="#f85149" font-size="16">隔离缺陷 #1：官方插件 UI 共享全局 settings.json</text>
+
+  <!-- 窗口 A 官方插件 -->
+  <rect class="box box-official" x="40" y="70" width="220" height="100" rx="8"/>
+  <text class="title" x="150" y="92" text-anchor="middle" fill="#bc8cff">窗口 A 官方插件 UI</text>
+  <text class="lbl-mute" x="150" y="110" text-anchor="middle">内部驱动 CLI binary</text>
+  <text class="lbl-red"  x="150" y="128" text-anchor="middle">无 CLAUDE_CONFIG_DIR</text>
+  <text class="lbl-red"  x="150" y="146" text-anchor="middle">→ 读全局配置</text>
+
+  <!-- 窗口 B 官方插件 -->
+  <rect class="box box-official" x="290" y="70" width="220" height="100" rx="8"/>
+  <text class="title" x="400" y="92" text-anchor="middle" fill="#bc8cff">窗口 B 官方插件 UI</text>
+  <text class="lbl-mute" x="400" y="110" text-anchor="middle">内部驱动 CLI binary</text>
+  <text class="lbl-red"  x="400" y="128" text-anchor="middle">无 CLAUDE_CONFIG_DIR</text>
+  <text class="lbl-red"  x="400" y="146" text-anchor="middle">→ 读全局配置</text>
+
+  <!-- 全局 settings.json -->
+  <rect class="pill" x="100" y="200" width="340" height="60" rx="8" stroke="#f85149" stroke-width="2"/>
+  <text class="pill-txt" x="270" y="222" text-anchor="middle" fill="#f85149" font-size="13" font-weight="700">~/.claude/settings.json（全局唯一）</text>
+  <text class="pill-key" x="270" y="242" text-anchor="middle">所有窗口的官方插件 UI 都读这一份</text>
+
+  <!-- 连线 -->
+  <path class="flow flow-read" d="M150 170 L 150 200"/>
+  <path class="flow flow-read" d="M400 170 L 400 200"/>
+  <path class="flow flow-share" d="M150 260 L 150 260" stroke-width="0"/>
+
+  <!-- 共享标注 -->
+  <line x1="150" y1="260" x2="400" y2="260" stroke="#f85149" stroke-width="2" stroke-dasharray="4 4"/>
+  <text class="lbl-red" x="275" y="278" text-anchor="middle" font-size="12">共享！无法各自使用不同配置</text>
+
+  <!-- 说明 -->
+  <rect class="box box-config" x="40" y="300" width="480" height="180" rx="8" fill="#1a1015" stroke="#f85149" stroke-width="1"/>
+  <text class="lbl" x="60" y="322" font-size="12" fill="#f85149" font-weight="700">原因：</text>
+  <text class="lbl-mute" x="60" y="342">1. 官方 Claude Code 插件不支持 CLAUDE_CONFIG_DIR 环境变量</text>
+  <text class="lbl-mute" x="60" y="362">2. 插件 UI 内部驱动的 CLI binary 始终读 ~/.claude/settings.json</text>
+  <text class="lbl-mute" x="60" y="382">3. proxy 扩展切换 Global Config = 改写 ~/.claude/settings.json + Reload Window</text>
+  <text class="lbl-mute" x="60" y="402">4. Reload Window 后，所有窗口的官方插件 UI 同时受影响</text>
+  <text class="lbl-red" x="60" y="428" font-weight="700">→ 窗口 A 切到配置 A，窗口 B 的官方插件 UI 也变成配置 A</text>
+  <text class="lbl-red" x="60" y="448" font-weight="700">→ 无法做到：窗口 A 用配置 A，窗口 B 用配置 B</text>
+  <text class="lbl-red" x="60" y="468" font-weight="700">→ 除非两个配置的 baseUrl/token 相同，只是 model 不同</text>
+
+  <!-- ===== 缺陷 #2 ===== -->
+  <rect class="danger-zone" x="560" y="20" width="520" height="480" rx="12"/>
+  <text class="title" x="820" y="48" text-anchor="middle" fill="#f85149" font-size="16">隔离缺陷 #2：Proxy Upstream 全局单例</text>
+
+  <!-- CLI A -->
+  <rect class="box box-cli" x="580" y="70" width="220" height="80" rx="8"/>
+  <text class="title" x="690" y="92" text-anchor="middle" fill="#f778ba">CLI A (Workspace A)</text>
+  <text class="lbl-key"  x="690" y="112" text-anchor="middle">CLAUDE_CONFIG_DIR=.claude_proxy/</text>
+  <text class="lbl-mute" x="690" y="130" text-anchor="middle">配置隔离 ✅ 读本地 settings.json</text>
+
+  <!-- CLI B -->
+  <rect class="box box-cli" x="830" y="70" width="220" height="80" rx="8"/>
+  <text class="title" x="940" y="92" text-anchor="middle" fill="#f778ba">CLI B (Workspace B)</text>
+  <text class="lbl-key"  x="940" y="112" text-anchor="middle">CLAUDE_CONFIG_DIR=.claude_proxy/</text>
+  <text class="lbl-mute" x="940" y="130" text-anchor="middle">配置隔离 ✅ 读本地 settings.json</text>
+
+  <!-- Proxy -->
+  <rect class="box box-proxy" x="660" y="190" width="300" height="100" rx="10" stroke="#f85149" stroke-width="2"/>
+  <text class="title" x="810" y="214" text-anchor="middle">Proxy Backend（全局单例）</text>
+  <text class="lbl-red"  x="810" y="236" text-anchor="middle">⚠ 只有一个 Upstream 出口</text>
+  <text class="lbl-red"  x="810" y="254" text-anchor="middle">setUpstream() last-write-wins</text>
+  <text class="lbl-mute" x="810" y="272" text-anchor="middle">proxy-config.json → env</text>
+
+  <!-- CLI A → Proxy -->
+  <path class="flow flow-data" d="M690 150 C 690 170, 750 190, 750 190"/>
+  <text class="lbl" x="700" y="175" font-size="10">请求</text>
+
+  <!-- CLI B → Proxy -->
+  <path class="flow flow-data" d="M940 150 C 940 170, 870 190, 870 190"/>
+  <text class="lbl" x="910" y="175" font-size="10">请求</text>
+
+  <!-- Upstream -->
+  <rect class="box box-llm" x="700" y="320" width="220" height="60" rx="10" stroke="#f85149" stroke-width="2"/>
+  <text class="title" x="810" y="344" text-anchor="middle">Upstream (唯一出口)</text>
+  <text class="lbl-red"  x="810" y="362" text-anchor="middle">baseUrl + token + model</text>
+
+  <!-- Proxy → Upstream -->
+  <path class="flow flow-data" d="M810 290 L 810 320"/>
+
+  <!-- 串味路径 -->
+  <path class="flow flow-danger" d="M690 150 C 690 170, 690 190, 700 210" stroke-width="0"/>
+  <text class="lbl-red" x="810" y="308" text-anchor="middle" font-size="10">所有请求 → 同一个后端</text>
+
+  <!-- 说明 -->
+  <rect class="box box-config" x="580" y="400" width="480" height="80" rx="8" fill="#1a1015" stroke="#f85149" stroke-width="1"/>
+  <text class="lbl" x="600" y="422" font-size="12" fill="#f85149" font-weight="700">原因：</text>
+  <text class="lbl-mute" x="600" y="442">1. CLAUDE_CONFIG_DIR 隔离了配置目录，但挡不到 Proxy 的运行时 Upstream</text>
+  <text class="lbl-mute" x="600" y="462">2. Proxy 进程全局只有一个，Upstream 也只有一份，不在任何 CLAUDE_CONFIG_DIR 里</text>
+
+</svg>
+<figcaption>图 2 · 两层隔离缺陷：#1 官方插件 UI 共享全局 settings.json；#2 Proxy Upstream 全局单例。CLAUDE_CONFIG_DIR 只隔离了配置目录，没有隔离运行时行为。</figcaption>
+</figure>
+
+<!-- ===================================================== 图3：为什么现在"能用" -->
+<h2><span class="num">3</span>为什么现在"能用"——恰好没串到不同后端</h2>
+<p class="cap">当前 Global 和 Local 配置指向同一个 Upstream 后端（相同 baseUrl/token），只是 model ID 不同。所以 last-write-wins 只改变 model，不会让请求打到错误的后端。</p>
+
+<figure>
+<svg viewBox="0 0 1100 340" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowG3" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#3fb950"/></marker>
+    <marker id="arrowO3" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#d29922"/></marker>
+    <marker id="arrowR3" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#f85149"/></marker>
+  </defs>
+
+  <!-- 当前场景 -->
+  <text class="title" x="550" y="30" text-anchor="middle" fill="#3fb950" font-size="15">当前场景：所有配置指向同一个 Upstream 后端</text>
+
+  <!-- Global Config -->
+  <rect class="box box-config" x="40" y="50" width="200" height="80" rx="8" stroke="#e3b341" stroke-width="1.5"/>
+  <text class="title" x="140" y="72" text-anchor="middle" fill="#e3b341" font-size="12">Global Config</text>
+  <text class="lbl-mute" x="60" y="92">baseUrl: https://api.example.com</text>
+  <text class="lbl-mute" x="60" y="108">token: sk-xxx-xxx</text>
+  <text class="lbl-key"  x="60" y="124">model: claude-sonnet-4-6</text>
+
+  <!-- Local Config A -->
+  <rect class="box box-config" x="280" y="50" width="200" height="80" rx="8" stroke="#3fb950" stroke-width="1.5"/>
+  <text class="title" x="380" y="72" text-anchor="middle" fill="#3fb950" font-size="12">Local Config A</text>
+  <text class="lbl-mute" x="300" y="92">baseUrl: https://api.example.com</text>
+  <text class="lbl-mute" x="300" y="108">token: sk-xxx-xxx</text>
+  <text class="lbl-key"  x="300" y="124">model: claude-opus-4-8</text>
+
+  <!-- Local Config B -->
+  <rect class="box box-config" x="520" y="50" width="200" height="80" rx="8" stroke="#3fb950" stroke-width="1.5"/>
+  <text class="title" x="620" y="72" text-anchor="middle" fill="#3fb950" font-size="12">Local Config B</text>
+  <text class="lbl-mute" x="540" y="92">baseUrl: https://api.example.com</text>
+  <text class="lbl-mute" x="540" y="108">token: sk-xxx-xxx</text>
+  <text class="lbl-key"  x="540" y="124">model: claude-haiku-4-5</text>
+
+  <!-- 相同标注 -->
+  <line x1="140" y1="140" x2="620" y2="140" stroke="#3fb950" stroke-width="2"/>
+  <text class="lbl-green" x="380" y="158" text-anchor="middle" font-size="12" font-weight="700">baseUrl + token 完全相同 ✅</text>
+
+  <!-- Proxy -->
+  <rect class="box box-proxy" x="280" y="180" width="200" height="60" rx="10"/>
+  <text class="title" x="380" y="204" text-anchor="middle">Proxy Upstream</text>
+  <text class="lbl-mute" x="380" y="224" text-anchor="middle">last-write-wins 只改 model</text>
+
+  <!-- LLM -->
+  <rect class="box box-llm" x="780" y="180" width="200" height="60" rx="10"/>
+  <text class="title" x="880" y="204" text-anchor="middle">LLM API</text>
+  <text class="lbl-mute" x="880" y="224" text-anchor="middle">https://api.example.com</text>
+
+  <!-- Proxy → LLM -->
+  <path class="flow flow-data" d="M480 210 L 780 210"/>
+  <text class="lbl-green" x="630" y="202" text-anchor="middle">请求始终到同一个后端 ✅</text>
+
+  <!-- 结论 -->
+  <rect class="box box-config" x="40" y="260" width="940" height="60" rx="8" fill="#0d1a0d" stroke="#3fb950" stroke-width="1"/>
+  <text class="lbl-green" x="510" y="284" text-anchor="middle" font-size="13" font-weight="700">✅ 看起来能用：baseUrl/token 相同，last-write-wins 只改变 model，请求不会打到错误的后端</text>
+  <text class="lbl-mute" x="510" y="304" text-anchor="middle">但 model 也可能被覆盖——窗口 A 期望用 opus，实际可能用了 haiku</text>
+
+  <!-- 危险场景 -->
+  <text class="title" x="550" y="360" text-anchor="middle" fill="#f85149" font-size="15">危险场景：不同配置指向不同 Upstream 后端</text>
+
+  <!-- Local Config A (不同后端) -->
+  <rect class="box box-config" x="40" y="380" width="240" height="80" rx="8" stroke="#f85149" stroke-width="2"/>
+  <text class="title" x="160" y="402" text-anchor="middle" fill="#f85149" font-size="12">Local Config A</text>
+  <text class="lbl-mute" x="60" y="422">baseUrl: https://company-gw.com</text>
+  <text class="lbl-mute" x="60" y="438">token: sk-company-xxx</text>
+  <text class="lbl-key"  x="60" y="454">model: claude-sonnet-4-6</text>
+
+  <!-- Local Config B (不同后端) -->
+  <rect class="box box-config" x="320" y="380" width="240" height="80" rx="8" stroke="#f85149" stroke-width="2"/>
+  <text class="title" x="440" y="402" text-anchor="middle" fill="#f85149" font-size="12">Local Config B</text>
+  <text class="lbl-mute" x="340" y="422">baseUrl: https://personal-key.com</text>
+  <text class="lbl-mute" x="340" y="438">token: sk-personal-xxx</text>
+  <text class="lbl-key"  x="340" y="454">model: claude-opus-4-8</text>
+
+  <!-- 不同标注 -->
+  <line x1="160" y1="470" x2="440" y2="470" stroke="#f85149" stroke-width="2" stroke-dasharray="4 4"/>
+  <text class="lbl-red" x="300" y="488" text-anchor="middle" font-size="12" font-weight="700">baseUrl + token 不同 ❌</text>
+
+  <!-- Proxy -->
+  <rect class="box box-proxy" x="280" y="510" width="200" height="60" rx="10" stroke="#f85149" stroke-width="2"/>
+  <text class="title" x="380" y="534" text-anchor="middle" fill="#f85149">Proxy Upstream</text>
+  <text class="lbl-red"  x="380" y="554" text-anchor="middle">last-write-wins → 串味！</text>
+
+  <!-- 两个 LLM -->
+  <rect class="box box-llm" x="620" y="490" width="200" height="50" rx="10" stroke="#f85149" stroke-width="1.5"/>
+  <text class="title" x="720" y="512" text-anchor="middle" font-size="12">公司网关</text>
+  <text class="lbl-mute" x="720" y="528" text-anchor="middle">company-gw.com</text>
+
+  <rect class="box box-llm" x="620" y="556" width="200" height="50" rx="10" stroke="#f85149" stroke-width="1.5"/>
+  <text class="title" x="720" y="578" text-anchor="middle" font-size="12">个人 Key</text>
+  <text class="lbl-mute" x="720" y="594" text-anchor="middle">personal-key.com</text>
+
+  <!-- 串味路径 -->
+  <path class="flow flow-danger" d="M480 540 C 540 540, 560 515, 620 515" stroke-width="3"/>
+  <text class="lbl-red" x="550" y="505" text-anchor="middle" font-size="10">CLI A 的请求</text>
+  <text class="lbl-red" x="550" y="518" text-anchor="middle" font-size="10">可能打到个人 Key！</text>
+
+  <path class="flow flow-danger" d="M480 540 C 540 540, 560 580, 620 580" stroke-width="3"/>
+  <text class="lbl-red" x="550" y="570" text-anchor="middle" font-size="10">CLI B 的请求</text>
+  <text class="lbl-red" x="550" y="583" text-anchor="middle" font-size="10">可能打到公司网关！</text>
+
+  <!-- 结论 -->
+  <rect class="box box-config" x="40" y="620" width="940" height="60" rx="8" fill="#1a0d0d" stroke="#f85149" stroke-width="1.5"/>
+  <text class="lbl-red" x="510" y="644" text-anchor="middle" font-size="13" font-weight="700">❌ 串味：公司请求打到个人 Key（用个人 key 扣费），或个人请求打到公司网关（401/审计）</text>
+  <text class="lbl-mute" x="510" y="664" text-anchor="middle">静默串味，无报错，极难察觉</text>
+
+</svg>
+<figcaption>图 3 · 上：当前"能用"是因为所有配置的 baseUrl/token 相同，last-write-wins 只改 model。下：一旦不同配置指向不同后端，就会静默串味。</figcaption>
+</figure>
+
+<!-- ===================================================== 总结表 -->
+<h2><span class="num">4</span>隔离能力总结</h2>
+
+<table>
+<tr><th>维度</th><th>当前状态</th><th>是否真正隔离</th><th>原因</th></tr>
+<tr>
+  <td>配置文件目录<br><code>CLAUDE_CONFIG_DIR</code></td>
+  <td>每个 Workspace 有独立的 <code>.claude_proxy/</code></td>
+  <td style="color:#3fb950;font-weight:700">✅ 隔离</td>
+  <td>Launcher 启动 CLI 时注入 <code>CLAUDE_CONFIG_DIR</code>，CLI 读 workspace 本地的 settings.json</td>
+</tr>
+<tr>
+  <td>对话历史 / 会话状态</td>
+  <td>每个 Workspace 独立</td>
+  <td style="color:#3fb950;font-weight:700">✅ 隔离</td>
+  <td>历史和会话存在 <code>CLAUDE_CONFIG_DIR</code> 下，天然隔离</td>
+</tr>
+<tr>
+  <td>官方插件 UI 配置</td>
+  <td>所有窗口共享 <code>~/.claude/settings.json</code></td>
+  <td style="color:#f85149;font-weight:700">❌ 不隔离</td>
+  <td>官方插件不支持 <code>CLAUDE_CONFIG_DIR</code>，内部 CLI binary 始终读全局 settings.json；切换 Global Config = 改写全局文件 + Reload Window，所有窗口同时受影响</td>
+</tr>
+<tr>
+  <td>Proxy Upstream<br>（运行时转发目标）</td>
+  <td>全局单例，只有一个出口</td>
+  <td style="color:#f85149;font-weight:700">❌ 不隔离</td>
+  <td>Proxy 进程靠端口 bind 保证全局单例；Upstream 存在 <code>proxy-config.json</code>，不在任何 <code>CLAUDE_CONFIG_DIR</code> 里；<code>setUpstream()</code> last-write-wins</td>
+</tr>
+<tr>
+  <td>Proxy 重试策略</td>
+  <td>全局共享</td>
+  <td style="color:#f85149;font-weight:700">❌ 不隔离</td>
+  <td>重试参数（maxAttempts、backoff）是 Proxy 进程全局配置，无法 per-workspace 定制</td>
+</tr>
+</table>
+
+<div class="note-red">
+<b>核心结论：</b>「Workspace Local LLM Config」隔离的只是<b>配置文件目录</b>（settings.json、对话历史、会话状态），没有隔离<b>运行时行为</b>（Proxy Upstream、重试策略）。当前能用是因为所有配置恰好指向同一个 Upstream 后端（baseUrl/token 相同），只是 model ID 不同——last-write-wins 只改变 model，不会让请求打到错误的后端。这不是真正的隔离，是巧合。
+</div>
+
+<div class="note-green">
+<b>真正隔离需要：</b><br>
+1. <b>官方插件 UI 隔离</b>：需要官方 Claude Code 插件支持 <code>CLAUDE_CONFIG_DIR</code> 或类似机制，让不同窗口的插件 UI 读不同的配置文件。目前无法从外部注入。<br>
+2. <b>Proxy Upstream 隔离</b>：需要每个 Workspace 有独立的 Proxy 实例（独立端口、独立 Upstream 状态），参见 <code>docs/pitfall-proxy-shared-upstream.md</code> 中的方案。
+</div>
+
+</body>
+</html>
